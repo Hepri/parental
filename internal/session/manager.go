@@ -44,6 +44,8 @@ var (
 	procSetTokenInformation          = advapi32.NewProc("SetTokenInformation")
 	procCreateEnvironmentBlock       = userenv.NewProc("CreateEnvironmentBlock")
 	procDestroyEnvironmentBlock      = userenv.NewProc("DestroyEnvironmentBlock")
+	procLoadUserProfile              = userenv.NewProc("LoadUserProfileW")
+	procUnloadUserProfile            = userenv.NewProc("UnloadUserProfileW")
 	procWTSGetActiveConsoleSessionId = kernel32.NewProc("WTSGetActiveConsoleSessionId")
 )
 
@@ -60,6 +62,18 @@ const (
 	CREATE_UNICODE_ENVIRONMENT = 0x00000400
 	TokenSessionId             = 12
 )
+
+type profileInfo struct {
+	Size        uint32
+	Flags       uint32
+	UserName    *uint16
+	ProfilePath *uint16
+	DefaultPath *uint16
+	ServerName  *uint16
+	PolicyPath  *uint16
+	ProfileGuid *uint16
+	hProfile    windows.Handle
+}
 
 type WTS_SESSION_INFO struct {
 	SessionID      uint32
@@ -394,6 +408,15 @@ func (m *Manager) logInUser(account *config.ChildAccount) error {
 			}
 			defer windows.CloseHandle(primaryToken)
 
+			// Load user profile (ensures registry hive and proper env variables)
+			var pinfo profileInfo
+			pinfo.Size = uint32(unsafe.Sizeof(pinfo))
+			pinfo.UserName = userPtr
+			_, _, _ = procLoadUserProfile.Call(
+				uintptr(primaryToken),
+				uintptr(unsafe.Pointer(&pinfo)),
+			)
+
 			// Assign console session ID to token
 			sidR, _, _ := procWTSGetActiveConsoleSessionId.Call()
 			sessionId := uint32(sidR)
@@ -432,6 +455,12 @@ func (m *Manager) logInUser(account *config.ChildAccount) error {
 			windows.CloseHandle(windows.Handle(pi.Thread))
 			if envPtr != 0 {
 				_, _, _ = procDestroyEnvironmentBlock.Call(envPtr)
+			}
+			if pinfo.hProfile != 0 {
+				_, _, _ = procUnloadUserProfile.Call(
+					uintptr(primaryToken),
+					uintptr(pinfo.hProfile),
+				)
 			}
 			return nil
 		}
