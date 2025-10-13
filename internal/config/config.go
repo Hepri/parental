@@ -34,6 +34,7 @@ var (
 
 	procNetUserGetInfo          = netapi32.NewProc("NetUserGetInfo")
 	procNetUserAdd              = netapi32.NewProc("NetUserAdd")
+	procNetUserSetInfo          = netapi32.NewProc("NetUserSetInfo")
 	procNetLocalGroupAddMembers = netapi32.NewProc("NetLocalGroupAddMembers")
 )
 
@@ -54,6 +55,11 @@ type UserInfo1 struct {
 	Comment     *uint16
 	Flags       uint32
 	ScriptPath  *uint16
+}
+
+// USER_INFO_1003 for NetUserSetInfo (set password)
+type UserInfo1003 struct {
+	Password *uint16
 }
 
 func LoadConfig(configPath string) (*Config, error) {
@@ -150,6 +156,22 @@ func EnsureChildAccounts(config *Config) error {
 			fmt.Printf("✓ Created user account: %s\n", account.Username)
 		} else {
 			fmt.Printf("✓ User account already exists: %s\n", account.Username)
+			// Ensure password matches config (reset if needed)
+			if account.Password == "" || account.Password == "auto-generated-on-creation" {
+				pwd, err := generateRandomPassword()
+				if err != nil {
+					return fmt.Errorf("failed to generate password for %s: %v", account.Username, err)
+				}
+				config.ChildAccounts[i].Password = pwd
+			}
+			if err := setUserPassword(account.Username, config.ChildAccounts[i].Password); err != nil {
+				return fmt.Errorf("failed to set password for %s: %v", account.Username, err)
+			}
+			// Ensure in Users group
+			usersGroup, err := getBuiltinUsersGroupName()
+			if err == nil {
+				_ = addUserToGroup(account.Username, usersGroup)
+			}
 		}
 	}
 
@@ -234,6 +256,25 @@ func createUserAccount(account ChildAccount) error {
 		return fmt.Errorf("NetUserAdd failed with code %d (parm error: %d): %s", ret, parmErr, errorMsg)
 	}
 
+	return nil
+}
+
+func setUserPassword(username, password string) error {
+	// Use NetUserSetInfo level 1003 to set password
+	userName, _ := windows.UTF16PtrFromString(username)
+	passPtr, _ := windows.UTF16PtrFromString(password)
+	ui := UserInfo1003{Password: passPtr}
+	var parmErr uint32
+	ret, _, _ := procNetUserSetInfo.Call(
+		0, // local computer
+		uintptr(unsafe.Pointer(userName)),
+		1003, // level
+		uintptr(unsafe.Pointer(&ui)),
+		uintptr(unsafe.Pointer(&parmErr)),
+	)
+	if ret != 0 {
+		return fmt.Errorf("NetUserSetInfo failed with code %d (parm %d)", ret, parmErr)
+	}
 	return nil
 }
 
