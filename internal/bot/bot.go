@@ -242,11 +242,18 @@ func (tb *TelegramBot) showGrantAccessMenu(chatID int64, messageID int) error {
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
 
-	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "👤 *Select Child Account*\n\nChoose which child to grant access to:")
-	editMsg.ParseMode = "Markdown"
-	editMsg.ReplyMarkup = &keyboard
+	if messageID > 0 {
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "👤 *Select Child Account*\n\nChoose which child to grant access to:")
+		editMsg.ParseMode = "Markdown"
+		editMsg.ReplyMarkup = &keyboard
+		_, err := tb.bot.Send(editMsg)
+		return err
+	}
 
-	_, err := tb.bot.Send(editMsg)
+	msg := tgbotapi.NewMessage(chatID, "👤 *Select Child Account*\n\nChoose which child to grant access to:")
+	msg.ParseMode = "Markdown"
+	msg.ReplyMarkup = keyboard
+	_, err := tb.bot.Send(msg)
 	return err
 }
 
@@ -268,8 +275,16 @@ func (tb *TelegramBot) showDurationMenu(chatID int64, messageID int) error {
 		),
 	)
 
-	userData := tb.userData[chatID]
-	username := userData["selected_user"].(string)
+	userData, ok := tb.userData[chatID]
+	if !ok {
+		tb.userStates[chatID] = "grant_duration"
+		return tb.showGrantAccessMenu(chatID, messageID)
+	}
+	username, ok := userData["selected_user"].(string)
+	if !ok || username == "" {
+		tb.userStates[chatID] = "grant_duration"
+		return tb.showGrantAccessMenu(chatID, messageID)
+	}
 
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf("⏰ *Select Duration*\n\nGranting access to: *%s*\n\nHow long should the session last?", username))
 	editMsg.ParseMode = "Markdown"
@@ -326,8 +341,17 @@ func (tb *TelegramBot) handleStateInput(message *tgbotapi.Message, state string)
 }
 
 func (tb *TelegramBot) grantAccess(chatID int64, messageID int, durationMinutes int) error {
-	userData := tb.userData[chatID]
-	username := userData["selected_user"].(string)
+	userData, ok := tb.userData[chatID]
+	if !ok {
+		// guide user to select child first
+		_ = tb.showGrantAccessMenu(chatID, messageID)
+		return fmt.Errorf("no child selected")
+	}
+	username, ok := userData["selected_user"].(string)
+	if !ok || username == "" {
+		_ = tb.showGrantAccessMenu(chatID, messageID)
+		return fmt.Errorf("no child selected")
+	}
 
 	duration := time.Duration(durationMinutes) * time.Minute
 
