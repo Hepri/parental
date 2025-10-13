@@ -40,6 +40,7 @@ var (
 	procCreateProcessAsUser          = advapi32.NewProc("CreateProcessAsUserW")
 	procCreateProcessWithLogon       = advapi32.NewProc("CreateProcessWithLogonW")
 	procWTSFreeMemory                = wtsapi32.NewProc("WTSFreeMemory")
+	procWTSLogonUser                 = wtsapi32.NewProc("WTSLogonUserW")
 	procDuplicateTokenEx             = advapi32.NewProc("DuplicateTokenEx")
 	procSetTokenInformation          = advapi32.NewProc("SetTokenInformation")
 	procCreateEnvironmentBlock       = userenv.NewProc("CreateEnvironmentBlock")
@@ -323,7 +324,7 @@ func (m *Manager) getSessionUsername(sessionID uint32) (string, error) {
 }
 
 func (m *Manager) logInUser(account *config.ChildAccount) error {
-	// Prefer CreateProcessWithLogonW which handles profile loading and session creation
+	// Attempt to create a full Windows logon session similar to interactive login
 	username, _ := windows.UTF16PtrFromString(account.Username)
 	password, _ := windows.UTF16PtrFromString(account.Password)
 
@@ -343,6 +344,49 @@ func (m *Manager) logInUser(account *config.ChildAccount) error {
 	// CREATE_NEW_CONSOLE  = 0x00000010
 	const LOGON_WITH_PROFILE = 0x00000001
 	const CREATE_NEW_CONSOLE = 0x00000010
+
+	// First, try WTSLogonUser to create a real session
+	var userToken windows.Handle
+	// LOGON32_LOGON_INTERACTIVE = 2, LOGON32_PROVIDER_DEFAULT = 0
+	// WTS_CURRENT_SERVER_HANDLE = 0, Logon type set to 2 (interactive)
+	wtsr, _, wtsErr := procWTSLogonUser.Call(
+		WTS_CURRENT_SERVER_HANDLE,
+		0, // Reserved
+		uintptr(unsafe.Pointer(username)),
+		uintptr(unsafe.Pointer(password)),
+		2, // LOGON32_LOGON_INTERACTIVE
+		0, // LOGON32_PROVIDER_DEFAULT
+		uintptr(unsafe.Pointer(&userToken)),
+	)
+	if wtsr != 0 {
+		// Try to switch console to the new session by running tscon
+		// Find target session id (the one owning the token is not trivial to query here),
+		// so we fallback to starting userinit in that session via CreateProcessAsUser
+		var si windows.StartupInfo
+		si.Cb = uint32(unsafe.Sizeof(si))
+		desktop, _ := windows.UTF16PtrFromString("winsta0\\default")
+		si.Desktop = desktop
+		var pi windows.ProcessInformation
+		app, _ := windows.UTF16PtrFromString("C:\\Windows\\System32\\userinit.exe")
+		cr, _, _ := procCreateProcessAsUser.Call(
+			uintptr(userToken),
+			0,
+			uintptr(unsafe.Pointer(app)),
+			0, 0, 0,
+			0,
+			0,
+			uintptr(unsafe.Pointer(&si)),
+			uintptr(unsafe.Pointer(&pi)),
+		)
+		if cr != 0 {
+			windows.CloseHandle(windows.Handle(pi.Process))
+			windows.CloseHandle(windows.Handle(pi.Thread))
+			return nil
+		}
+		// If CreateProcessAsUser failed, fall through to other methods
+	} else {
+		_ = wtsErr
+	}
 
 	// Try with NULL domain (local account) and proper environment/desktop
 	// Build environment block for the user to avoid 0xC0000142 (DLL init failed)
