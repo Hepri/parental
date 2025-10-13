@@ -100,7 +100,7 @@ func (tb *TelegramBot) handleUpdate(update tgbotapi.Update) error {
 
 	// Check authorization
 	if !tb.isAuthorized(userID) {
-		msg := tgbotapi.NewMessage(chatID, "⛔ Access denied. This bot is for authorized parents only.")
+		msg := tgbotapi.NewMessage(chatID, "⛔ Доступ запрещён. Этот бот предназначен только для авторизованных родителей.")
 		tb.bot.Send(msg)
 		return nil
 	}
@@ -141,7 +141,7 @@ func (tb *TelegramBot) handleMessage(message *tgbotapi.Message) error {
 		}
 
 		// Unknown command
-		msg := tgbotapi.NewMessage(chatID, "Unknown command. Use /start to see the main menu.")
+		msg := tgbotapi.NewMessage(chatID, "Неизвестная команда. Используйте /start, чтобы открыть главное меню.")
 		tb.bot.Send(msg)
 		return nil
 	}
@@ -189,20 +189,20 @@ func (tb *TelegramBot) handleCallbackQuery(query *tgbotapi.CallbackQuery) error 
 func (tb *TelegramBot) showMainMenu(chatID int64) error {
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🟢 Grant Access", "grant_menu"),
+			tgbotapi.NewInlineKeyboardButtonData("🟢 Выдать доступ", "grant_menu"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🔒 Lock Session", "lock_menu"),
+			tgbotapi.NewInlineKeyboardButtonData("🔒 Завершить сеанс", "lock_menu"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📊 View Statistics", "stats_menu"),
+			tgbotapi.NewInlineKeyboardButtonData("📊 Статистика", "stats_menu"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("⚙️ Computer Control", "computer_menu"),
+			tgbotapi.NewInlineKeyboardButtonData("⚙️ Управление компьютером", "computer_menu"),
 		),
 	)
 
-	msg := tgbotapi.NewMessage(chatID, "🏠 *Parental Control Bot*\n\nSelect an option:")
+	msg := tgbotapi.NewMessage(chatID, "🏠 *Родительский контроль*\n\nВыберите действие:")
 	msg.ParseMode = "Markdown"
 	msg.ReplyMarkup = keyboard
 
@@ -237,20 +237,20 @@ func (tb *TelegramBot) showGrantAccessMenu(chatID int64, messageID int) error {
 	}
 
 	buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
-		tgbotapi.NewInlineKeyboardButtonData("🔙 Back to Main Menu", "main_menu"),
+		tgbotapi.NewInlineKeyboardButtonData("🔙 Назад в главное меню", "main_menu"),
 	))
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
 
 	if messageID > 0 {
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "👤 *Select Child Account*\n\nChoose which child to grant access to:")
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "👤 *Выбор аккаунта ребёнка*\n\nКому выдать доступ?")
 		editMsg.ParseMode = "Markdown"
 		editMsg.ReplyMarkup = &keyboard
 		_, err := tb.bot.Send(editMsg)
 		return err
 	}
 
-	msg := tgbotapi.NewMessage(chatID, "👤 *Select Child Account*\n\nChoose which child to grant access to:")
+	msg := tgbotapi.NewMessage(chatID, "👤 *Выбор аккаунта ребёнка*\n\nКому выдать доступ?")
 	msg.ParseMode = "Markdown"
 	msg.ReplyMarkup = keyboard
 	_, err := tb.bot.Send(msg)
@@ -260,18 +260,18 @@ func (tb *TelegramBot) showGrantAccessMenu(chatID int64, messageID int) error {
 func (tb *TelegramBot) showDurationMenu(chatID int64, messageID int) error {
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("15 minutes", "duration_15"),
-			tgbotapi.NewInlineKeyboardButtonData("30 minutes", "duration_30"),
+			tgbotapi.NewInlineKeyboardButtonData("15 минут", "duration_15"),
+			tgbotapi.NewInlineKeyboardButtonData("30 минут", "duration_30"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("1 hour", "duration_60"),
-			tgbotapi.NewInlineKeyboardButtonData("2 hours", "duration_120"),
+			tgbotapi.NewInlineKeyboardButtonData("1 час", "duration_60"),
+			tgbotapi.NewInlineKeyboardButtonData("2 часа", "duration_120"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("Custom", "duration_custom"),
+			tgbotapi.NewInlineKeyboardButtonData("Другая длительность", "duration_custom"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🔙 Back", "grant_menu"),
+			tgbotapi.NewInlineKeyboardButtonData("🔙 Назад", "grant_menu"),
 		),
 	)
 
@@ -286,7 +286,7 @@ func (tb *TelegramBot) showDurationMenu(chatID int64, messageID int) error {
 		return tb.showGrantAccessMenu(chatID, messageID)
 	}
 
-	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf("⏰ *Select Duration*\n\nGranting access to: *%s*\n\nHow long should the session last?", username))
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf("⏰ *Выбор длительности*\n\nПользователь: *%s*\n\nНа сколько выдать доступ?", username))
 	editMsg.ParseMode = "Markdown"
 	editMsg.ReplyMarkup = &keyboard
 
@@ -297,11 +297,11 @@ func (tb *TelegramBot) showDurationMenu(chatID int64, messageID int) error {
 func (tb *TelegramBot) handleDurationSelection(data string, chatID int64, messageID int) error {
 	if data == "duration_custom" {
 		tb.userStates[chatID] = "custom_duration"
-		msg := tgbotapi.NewEditMessageText(chatID, messageID, "⌨️ *Custom Duration*\n\nPlease enter the duration in minutes (1-480):")
+		msg := tgbotapi.NewEditMessageText(chatID, messageID, "⌨️ *Своя длительность*\n\nВведите длительность в минутах (1–480):")
 		msg.ParseMode = "Markdown"
 		msg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{
 			InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
-				{tgbotapi.NewInlineKeyboardButtonData("🔙 Back", "grant_menu")},
+				{tgbotapi.NewInlineKeyboardButtonData("🔙 Назад", "grant_menu")},
 			},
 		}
 		_, err := tb.bot.Send(msg)
@@ -326,7 +326,7 @@ func (tb *TelegramBot) handleStateInput(message *tgbotapi.Message, state string)
 	case "custom_duration":
 		duration, err := strconv.Atoi(text)
 		if err != nil || duration < 1 || duration > 480 {
-			msg := tgbotapi.NewMessage(chatID, "❌ Invalid duration. Please enter a number between 1 and 480 minutes.")
+			msg := tgbotapi.NewMessage(chatID, "❌ Некорректная длительность. Введите число от 1 до 480 минут.")
 			tb.bot.Send(msg)
 			return nil
 		}
@@ -357,7 +357,7 @@ func (tb *TelegramBot) grantAccess(chatID int64, messageID int, durationMinutes 
 
 	err := tb.sessionMgr.GrantAccess(username, duration)
 	if err != nil {
-		msgText := fmt.Sprintf("❌ Failed to grant access to %s: %v", username, err)
+		msgText := fmt.Sprintf("❌ Не удалось выдать доступ для %s: %v", username, err)
 		if messageID > 0 {
 			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msgText)
 			tb.bot.Send(editMsg)
@@ -371,14 +371,14 @@ func (tb *TelegramBot) grantAccess(chatID int64, messageID int, durationMinutes 
 	// Clear user data
 	delete(tb.userData, chatID)
 
-	msgText := fmt.Sprintf("✅ *Access Granted*\n\n👤 User: %s\n⏰ Duration: %d minutes\n\nSession will automatically lock after the time expires.", username, durationMinutes)
+	msgText := fmt.Sprintf("✅ *Доступ выдан*\n\n👤 Пользователь: %s\n⏰ Длительность: %d мин\n\nПо окончании времени сеанс будет завершён, а пароль — восстановлен.", username, durationMinutes)
 	if messageID > 0 {
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msgText)
 		editMsg.ParseMode = "Markdown"
 		editMsg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{
 			InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
-				{tgbotapi.NewInlineKeyboardButtonData("🔒 Lock Now", "lock_"+username)},
-				{tgbotapi.NewInlineKeyboardButtonData("🏠 Main Menu", "main_menu")},
+				{tgbotapi.NewInlineKeyboardButtonData("🔒 Завершить сейчас", "lock_"+username)},
+				{tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu")},
 			},
 		}
 		_, err = tb.bot.Send(editMsg)
@@ -387,10 +387,10 @@ func (tb *TelegramBot) grantAccess(chatID int64, messageID int, durationMinutes 
 		msg.ParseMode = "Markdown"
 		msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("🔒 Lock Now", "lock_"+username),
+				tgbotapi.NewInlineKeyboardButtonData("🔒 Завершить сейчас", "lock_"+username),
 			),
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("🏠 Main Menu", "main_menu"),
+				tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu"),
 			),
 		)
 		_, err = tb.bot.Send(msg)
@@ -408,18 +408,18 @@ func (tb *TelegramBot) handleLockSession(data string, chatID int64, messageID in
 
 	err := tb.sessionMgr.LockSession(username)
 	if err != nil {
-		msgText := fmt.Sprintf("❌ Failed to lock session for %s: %v", username, err)
+		msgText := fmt.Sprintf("❌ Не удалось завершить сеанс %s: %v", username, err)
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msgText)
 		tb.bot.Send(editMsg)
 		return err
 	}
 
-	msgText := fmt.Sprintf("🔒 *Session Locked*\n\nUser %s has been locked out.", username)
+	msgText := fmt.Sprintf("🔒 *Сеанс завершён*\n\nПользователь %s вышел из системы, пароль восстановлен.", username)
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msgText)
 	editMsg.ParseMode = "Markdown"
 	editMsg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{
 		InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
-			{tgbotapi.NewInlineKeyboardButtonData("🏠 Main Menu", "main_menu")},
+			{tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu")},
 		},
 	}
 
@@ -433,12 +433,12 @@ func (tb *TelegramBot) showLockMenu(chatID int64, messageID int) error {
 	var buttons [][]tgbotapi.InlineKeyboardButton
 
 	if len(activeSessions) == 0 {
-		msgText := "🔒 *Lock Sessions*\n\nNo active sessions found."
+		msgText := "🔒 *Сеансы*\n\nАктивные сеансы не найдены."
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msgText)
 		editMsg.ParseMode = "Markdown"
 		editMsg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{
 			InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
-				{tgbotapi.NewInlineKeyboardButtonData("🏠 Main Menu", "main_menu")},
+				{tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu")},
 			},
 		}
 		_, err := tb.bot.Send(editMsg)
@@ -447,7 +447,7 @@ func (tb *TelegramBot) showLockMenu(chatID int64, messageID int) error {
 
 	for username, session := range activeSessions {
 		remaining := session.Duration - time.Since(session.StartTime)
-		buttonText := fmt.Sprintf("🔒 %s (%v remaining)", username, remaining.Round(time.Minute))
+		buttonText := fmt.Sprintf("🔒 %s (осталось %v)", username, remaining.Round(time.Minute))
 		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(buttonText, "lock_"+username),
 		))
@@ -455,17 +455,17 @@ func (tb *TelegramBot) showLockMenu(chatID int64, messageID int) error {
 
 	if len(activeSessions) > 1 {
 		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🔒 Lock All", "lock_all"),
+			tgbotapi.NewInlineKeyboardButtonData("🔒 Завершить все", "lock_all"),
 		))
 	}
 
 	buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
-		tgbotapi.NewInlineKeyboardButtonData("🏠 Main Menu", "main_menu"),
+		tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu"),
 	))
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
 
-	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "🔒 *Lock Sessions*\n\nSelect a session to lock:")
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "🔒 *Сеансы*\n\nВыберите сеанс для завершения:")
 	editMsg.ParseMode = "Markdown"
 	editMsg.ReplyMarkup = &keyboard
 
@@ -476,17 +476,17 @@ func (tb *TelegramBot) showLockMenu(chatID int64, messageID int) error {
 func (tb *TelegramBot) showStatsMenu(chatID int64, messageID int) error {
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📊 Today's Report", "stats_today"),
+			tgbotapi.NewInlineKeyboardButtonData("📊 Отчёт за сегодня", "stats_today"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📊 This Week's Report", "stats_week"),
+			tgbotapi.NewInlineKeyboardButtonData("📊 Отчёт за неделю", "stats_week"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🏠 Main Menu", "main_menu"),
+			tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu"),
 		),
 	)
 
-	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "📊 *View Statistics*\n\nSelect a time period to view activity reports:")
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "📊 *Статистика*\n\nВыберите период для отчёта:")
 	editMsg.ParseMode = "Markdown"
 	editMsg.ReplyMarkup = &keyboard
 
@@ -497,31 +497,31 @@ func (tb *TelegramBot) showStatsMenu(chatID int64, messageID int) error {
 func (tb *TelegramBot) showComputerMenu(chatID int64, messageID int) error {
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("💻 Status", "computer_status"),
+			tgbotapi.NewInlineKeyboardButtonData("💻 Состояние", "computer_status"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🔴 Shutdown Now", "shutdown_now"),
+			tgbotapi.NewInlineKeyboardButtonData("🔴 Выключить сейчас", "shutdown_now"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("⏰ Schedule Shutdown", "shutdown_menu"),
+			tgbotapi.NewInlineKeyboardButtonData("⏰ Запланировать выключение", "shutdown_menu"),
 		),
 	)
 
 	if tb.shutdownMgr.IsShutdownScheduled() {
 		keyboard.InlineKeyboard = append(keyboard.InlineKeyboard,
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("❌ Cancel Shutdown", "cancel_shutdown"),
+				tgbotapi.NewInlineKeyboardButtonData("❌ Отменить выключение", "cancel_shutdown"),
 			),
 		)
 	}
 
 	keyboard.InlineKeyboard = append(keyboard.InlineKeyboard,
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🏠 Main Menu", "main_menu"),
+			tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu"),
 		),
 	)
 
-	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "⚙️ *Computer Control*\n\nSelect an option:")
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "⚙️ *Управление компьютером*\n\nВыберите действие:")
 	editMsg.ParseMode = "Markdown"
 	editMsg.ReplyMarkup = &keyboard
 
@@ -533,13 +533,13 @@ func (tb *TelegramBot) showTodayStats(chatID int64, messageID int) error {
 	report := tb.tracker.GetTodayReport()
 
 	if len(report) == 0 {
-		msgText := "📊 *Today's Report*\n\nNo activity recorded today."
+		msgText := "📊 *Отчёт за сегодня*\n\nДанных об активности нет."
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msgText)
 		editMsg.ParseMode = "Markdown"
 		editMsg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{
 			InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
-				{tgbotapi.NewInlineKeyboardButtonData("📊 This Week", "stats_week")},
-				{tgbotapi.NewInlineKeyboardButtonData("🏠 Main Menu", "main_menu")},
+				{tgbotapi.NewInlineKeyboardButtonData("📊 За неделю", "stats_week")},
+				{tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu")},
 			},
 		}
 		_, err := tb.bot.Send(editMsg)
@@ -547,23 +547,23 @@ func (tb *TelegramBot) showTodayStats(chatID int64, messageID int) error {
 	}
 
 	var msgText strings.Builder
-	msgText.WriteString("📊 *Today's Report*\n\n")
+	msgText.WriteString("📊 *Отчёт за сегодня*\n\n")
 
 	totalTime := int64(0)
 	for app, seconds := range report {
 		totalTime += seconds
 		minutes := seconds / 60
-		msgText.WriteString(fmt.Sprintf("• %s: %d minutes\n", app, minutes))
+		msgText.WriteString(fmt.Sprintf("• %s: %d мин\n", app, minutes))
 	}
 
-	msgText.WriteString(fmt.Sprintf("\n📈 Total: %d minutes", totalTime/60))
+	msgText.WriteString(fmt.Sprintf("\n📈 Итого: %d мин", totalTime/60))
 
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msgText.String())
 	editMsg.ParseMode = "Markdown"
 	editMsg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{
 		InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
-			{tgbotapi.NewInlineKeyboardButtonData("📊 This Week", "stats_week")},
-			{tgbotapi.NewInlineKeyboardButtonData("🏠 Main Menu", "main_menu")},
+			{tgbotapi.NewInlineKeyboardButtonData("📊 За неделю", "stats_week")},
+			{tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu")},
 		},
 	}
 
@@ -575,13 +575,13 @@ func (tb *TelegramBot) showWeekStats(chatID int64, messageID int) error {
 	report := tb.tracker.GetWeekReport()
 
 	if len(report) == 0 {
-		msgText := "📊 *This Week's Report*\n\nNo activity recorded this week."
+		msgText := "📊 *Отчёт за неделю*\n\nДанных об активности нет."
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msgText)
 		editMsg.ParseMode = "Markdown"
 		editMsg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{
 			InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
-				{tgbotapi.NewInlineKeyboardButtonData("📊 Today", "stats_today")},
-				{tgbotapi.NewInlineKeyboardButtonData("🏠 Main Menu", "main_menu")},
+				{tgbotapi.NewInlineKeyboardButtonData("📊 За сегодня", "stats_today")},
+				{tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu")},
 			},
 		}
 		_, err := tb.bot.Send(editMsg)
@@ -589,23 +589,23 @@ func (tb *TelegramBot) showWeekStats(chatID int64, messageID int) error {
 	}
 
 	var msgText strings.Builder
-	msgText.WriteString("📊 *This Week's Report*\n\n")
+	msgText.WriteString("📊 *Отчёт за неделю*\n\n")
 
 	totalTime := int64(0)
 	for app, seconds := range report {
 		totalTime += seconds
 		minutes := seconds / 60
-		msgText.WriteString(fmt.Sprintf("• %s: %d minutes\n", app, minutes))
+		msgText.WriteString(fmt.Sprintf("• %s: %d мин\n", app, minutes))
 	}
 
-	msgText.WriteString(fmt.Sprintf("\n📈 Total: %d minutes", totalTime/60))
+	msgText.WriteString(fmt.Sprintf("\n📈 Итого: %d мин", totalTime/60))
 
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msgText.String())
 	editMsg.ParseMode = "Markdown"
 	editMsg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{
 		InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
-			{tgbotapi.NewInlineKeyboardButtonData("📊 Today", "stats_today")},
-			{tgbotapi.NewInlineKeyboardButtonData("🏠 Main Menu", "main_menu")},
+			{tgbotapi.NewInlineKeyboardButtonData("📊 За сегодня", "stats_today")},
+			{tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu")},
 		},
 	}
 
@@ -617,30 +617,30 @@ func (tb *TelegramBot) showComputerStatus(chatID int64, messageID int) error {
 	activeSessions := tb.sessionMgr.GetActiveSessions()
 
 	var msgText strings.Builder
-	msgText.WriteString("💻 *Computer Status*\n\n")
+	msgText.WriteString("💻 *Состояние компьютера*\n\n")
 
 	if len(activeSessions) == 0 {
-		msgText.WriteString("🔒 No active sessions\n")
+		msgText.WriteString("🔒 Активных сеансов нет\n")
 	} else {
-		msgText.WriteString("🟢 Active Sessions:\n")
+		msgText.WriteString("🟢 Активные сеансы:\n")
 		for username, session := range activeSessions {
 			remaining := session.Duration - time.Since(session.StartTime)
-			msgText.WriteString(fmt.Sprintf("• %s: %v remaining\n", username, remaining.Round(time.Minute)))
+			msgText.WriteString(fmt.Sprintf("• %s: осталось %v\n", username, remaining.Round(time.Minute)))
 		}
 	}
 
 	if tb.shutdownMgr.IsShutdownScheduled() {
 		scheduledTime := tb.shutdownMgr.GetScheduledTime()
-		msgText.WriteString(fmt.Sprintf("\n⏰ Shutdown scheduled: %s", scheduledTime.Format("15:04")))
+		msgText.WriteString(fmt.Sprintf("\n⏰ Выключение запланировано: %s", scheduledTime.Format("15:04")))
 	}
 
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msgText.String())
 	editMsg.ParseMode = "Markdown"
 	editMsg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{
 		InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
-			{tgbotapi.NewInlineKeyboardButtonData("🔴 Shutdown Now", "shutdown_now")},
-			{tgbotapi.NewInlineKeyboardButtonData("⏰ Schedule Shutdown", "shutdown_menu")},
-			{tgbotapi.NewInlineKeyboardButtonData("🏠 Main Menu", "main_menu")},
+			{tgbotapi.NewInlineKeyboardButtonData("🔴 Выключить сейчас", "shutdown_now")},
+			{tgbotapi.NewInlineKeyboardButtonData("⏰ Запланировать выключение", "shutdown_menu")},
+			{tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu")},
 		},
 	}
 
@@ -651,26 +651,26 @@ func (tb *TelegramBot) showComputerStatus(chatID int64, messageID int) error {
 func (tb *TelegramBot) shutdownNow(chatID int64, messageID int) error {
 	err := tb.shutdownMgr.ShutdownNow()
 	if err != nil {
-		msgText := fmt.Sprintf("❌ *Shutdown Failed*\n\nError: %v", err)
+		msgText := fmt.Sprintf("❌ *Не удалось выключить*\n\nОшибка: %v", err)
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msgText)
 		editMsg.ParseMode = "Markdown"
 		editMsg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{
 			InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
-				{tgbotapi.NewInlineKeyboardButtonData("🏠 Main Menu", "main_menu")},
+				{tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu")},
 			},
 		}
 		_, err = tb.bot.Send(editMsg)
 		return err
 	}
 
-	msgText := "🔴 *Shutdown Initiated*\n\nThe computer will shutdown in 30 seconds."
+	msgText := "🔴 *Выключение инициировано*\n\nКомпьютер выключится через 30 секунд."
 
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msgText)
 	editMsg.ParseMode = "Markdown"
 	editMsg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{
 		InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
-			{tgbotapi.NewInlineKeyboardButtonData("❌ Cancel Shutdown", "cancel_shutdown")},
-			{tgbotapi.NewInlineKeyboardButtonData("🏠 Main Menu", "main_menu")},
+			{tgbotapi.NewInlineKeyboardButtonData("❌ Отменить выключение", "cancel_shutdown")},
+			{tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu")},
 		},
 	}
 
@@ -682,19 +682,19 @@ func (tb *TelegramBot) scheduleShutdown(data string, chatID int64, messageID int
 	if data == "shutdown_menu" {
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("5 minutes", "shutdown_5"),
-				tgbotapi.NewInlineKeyboardButtonData("15 minutes", "shutdown_15"),
+				tgbotapi.NewInlineKeyboardButtonData("5 минут", "shutdown_5"),
+				tgbotapi.NewInlineKeyboardButtonData("15 минут", "shutdown_15"),
 			),
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("30 minutes", "shutdown_30"),
-				tgbotapi.NewInlineKeyboardButtonData("1 hour", "shutdown_60"),
+				tgbotapi.NewInlineKeyboardButtonData("30 минут", "shutdown_30"),
+				tgbotapi.NewInlineKeyboardButtonData("1 час", "shutdown_60"),
 			),
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("🏠 Main Menu", "main_menu"),
+				tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu"),
 			),
 		)
 
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "⏰ *Schedule Shutdown*\n\nWhen should the computer shutdown?")
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "⏰ *Запланировать выключение*\n\nВыберите, через сколько минут выключить компьютер:")
 		editMsg.ParseMode = "Markdown"
 		editMsg.ReplyMarkup = &keyboard
 
@@ -702,39 +702,36 @@ func (tb *TelegramBot) scheduleShutdown(data string, chatID int64, messageID int
 		return err
 	}
 
-	// Extract minutes from callback data
-	minutesStr := strings.TrimPrefix(data, "shutdown_")
-	minutes, err := strconv.Atoi(minutesStr)
+	// parse minutes
+	minsStr := strings.TrimPrefix(data, "shutdown_")
+	mins, err := strconv.Atoi(minsStr)
 	if err != nil {
 		return err
 	}
 
-	err = tb.shutdownMgr.ScheduleShutdown(minutes)
+	err = tb.shutdownMgr.ScheduleShutdown(mins)
 	if err != nil {
-		msgText := fmt.Sprintf("❌ *Scheduling Failed*\n\nError: %v", err)
+		msgText := fmt.Sprintf("❌ *Не удалось запланировать выключение*\n\nОшибка: %v", err)
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msgText)
 		editMsg.ParseMode = "Markdown"
 		editMsg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{
 			InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
-				{tgbotapi.NewInlineKeyboardButtonData("🏠 Main Menu", "main_menu")},
+				{tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu")},
 			},
 		}
 		_, err = tb.bot.Send(editMsg)
 		return err
 	}
 
-	scheduledTime := tb.shutdownMgr.GetScheduledTime()
-	msgText := fmt.Sprintf("⏰ *Shutdown Scheduled*\n\nThe computer will shutdown in %d minutes (%s).", minutes, scheduledTime.Format("15:04"))
-
+	msgText := fmt.Sprintf("⏰ *Выключение запланировано*\n\nКомпьютер выключится через %d минут.", mins)
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msgText)
 	editMsg.ParseMode = "Markdown"
 	editMsg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{
 		InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
-			{tgbotapi.NewInlineKeyboardButtonData("❌ Cancel Shutdown", "cancel_shutdown")},
-			{tgbotapi.NewInlineKeyboardButtonData("🏠 Main Menu", "main_menu")},
+			{tgbotapi.NewInlineKeyboardButtonData("❌ Отменить выключение", "cancel_shutdown")},
+			{tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu")},
 		},
 	}
-
 	_, err = tb.bot.Send(editMsg)
 	return err
 }
@@ -742,28 +739,26 @@ func (tb *TelegramBot) scheduleShutdown(data string, chatID int64, messageID int
 func (tb *TelegramBot) cancelShutdown(chatID int64, messageID int) error {
 	err := tb.shutdownMgr.CancelShutdown()
 	if err != nil {
-		msgText := fmt.Sprintf("❌ *Cancel Failed*\n\nError: %v", err)
+		msgText := fmt.Sprintf("❌ *Не удалось отменить выключение*\n\nОшибка: %v", err)
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msgText)
 		editMsg.ParseMode = "Markdown"
 		editMsg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{
 			InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
-				{tgbotapi.NewInlineKeyboardButtonData("🏠 Main Menu", "main_menu")},
+				{tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu")},
 			},
 		}
 		_, err = tb.bot.Send(editMsg)
 		return err
 	}
 
-	msgText := "❌ *Shutdown Cancelled*\n\nThe scheduled shutdown has been cancelled."
-
+	msgText := "❌ *Выключение отменено*."
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msgText)
 	editMsg.ParseMode = "Markdown"
 	editMsg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{
 		InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
-			{tgbotapi.NewInlineKeyboardButtonData("🏠 Main Menu", "main_menu")},
+			{tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu")},
 		},
 	}
-
 	_, err = tb.bot.Send(editMsg)
 	return err
 }
@@ -771,7 +766,7 @@ func (tb *TelegramBot) cancelShutdown(chatID int64, messageID int) error {
 func (tb *TelegramBot) NotifySessionExpired(username string) {
 	// Notify all authorized users about expired session
 	for _, userID := range tb.config.AuthorizedUserIDs {
-		msg := tgbotapi.NewMessage(userID, fmt.Sprintf("⏰ *Session Expired*\n\nUser %s's session has expired and has been locked.", username))
+		msg := tgbotapi.NewMessage(userID, fmt.Sprintf("⏰ *Сеанс истек*\n\nСессия пользователя %s истекла и заблокирована.", username))
 		msg.ParseMode = "Markdown"
 		tb.bot.Send(msg)
 	}
