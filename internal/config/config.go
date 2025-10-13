@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"unsafe"
 
@@ -128,13 +129,23 @@ func EnsureChildAccounts(config *Config) error {
 
 			// Create user account
 			if err := createUserAccount(account); err != nil {
-				return fmt.Errorf("failed to create user account %s: %v", account.Username, err)
+				// Try alternative method if NetUserAdd fails
+				if err2 := createUserAccountAlternative(account); err2 != nil {
+					return fmt.Errorf("failed to create user account %s: %v (alternative method also failed: %v)", account.Username, err, err2)
+				}
+				fmt.Printf("✓ Created user account using alternative method: %s\n", account.Username)
+			} else {
+				fmt.Printf("✓ Created user account: %s\n", account.Username)
 			}
 
 			// Add to Users group
 			if err := addUserToGroup(account.Username, "Users"); err != nil {
 				return fmt.Errorf("failed to add user %s to Users group: %v", account.Username, err)
 			}
+
+			fmt.Printf("✓ Created user account: %s\n", account.Username)
+		} else {
+			fmt.Printf("✓ User account already exists: %s\n", account.Username)
 		}
 	}
 
@@ -143,6 +154,7 @@ func EnsureChildAccounts(config *Config) error {
 }
 
 func userExists(username string) (bool, error) {
+	// Try NetUserGetInfo first
 	serverName, _ := windows.UTF16PtrFromString("")
 	userName, _ := windows.UTF16PtrFromString(username)
 
@@ -164,7 +176,33 @@ func userExists(username string) (bool, error) {
 		return false, nil
 	}
 
-	return false, fmt.Errorf("NetUserGetInfo failed with code %d", ret)
+	// If NetUserGetInfo fails, try alternative method
+	cmd := exec.Command("net", "user", username)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("both NetUserGetInfo and net user command failed: NetUserGetInfo error %d, net user error: %v", ret, err)
+	}
+
+	// Check if output contains "User name" (user exists) or "The user name could not be found"
+	outputStr := string(output)
+	if contains(outputStr, "User name") && !contains(outputStr, "could not be found") {
+		return true, nil
+	}
+
+	return false, nil
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || (len(s) > len(substr) && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || containsSubstring(s, substr))))
+}
+
+func containsSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
 
 func createUserAccount(account ChildAccount) error {
@@ -181,15 +219,58 @@ func createUserAccount(account ChildAccount) error {
 		Comment:  fullName,
 	}
 
+	var parmErr uint32
 	ret, _, _ := procNetUserAdd.Call(
 		uintptr(unsafe.Pointer(serverName)),
 		1, // INFO_LEVEL
 		uintptr(unsafe.Pointer(&userInfo)),
-		0, // PARM_ERROR
+		uintptr(unsafe.Pointer(&parmErr)),
 	)
 
 	if ret != 0 {
-		return fmt.Errorf("NetUserAdd failed with code %d", ret)
+		errorMsg := getNetApiErrorMessage(ret)
+		return fmt.Errorf("NetUserAdd failed with code %d (parm error: %d): %s", ret, parmErr, errorMsg)
+	}
+
+	return nil
+}
+
+func getNetApiErrorMessage(errorCode uintptr) string {
+	switch errorCode {
+	case 2221:
+		return "Invalid computer name or insufficient privileges"
+	case 2224:
+		return "User already exists"
+	case 2225:
+		return "User does not exist"
+	case 2226:
+		return "Password too short or does not meet complexity requirements"
+	case 2227:
+		return "Invalid password"
+	case 5:
+		return "Access denied - run as administrator"
+	case 87:
+		return "Invalid parameter"
+	case 1314:
+		return "A required privilege is not held by the client"
+	default:
+		return fmt.Sprintf("Unknown error code: %d", errorCode)
+	}
+}
+
+func createUserAccountAlternative(account ChildAccount) error {
+	// Alternative method using net.exe command
+	cmd := exec.Command("net", "user", account.Username, account.Password, "/add", "/fullname:"+account.FullName, "/passwordchg:no", "/expires:never")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("net user command failed: %v, output: %s", err, string(output))
+	}
+
+	// Add to Users group
+	cmd = exec.Command("net", "localgroup", "Users", account.Username, "/add")
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("net localgroup command failed: %v, output: %s", err, string(output))
 	}
 
 	return nil
