@@ -155,14 +155,13 @@ func EnsureChildAccounts(config *Config) error {
 
 func userExists(username string) (bool, error) {
 	// Try NetUserGetInfo first
-	serverName, _ := windows.UTF16PtrFromString("")
 	userName, _ := windows.UTF16PtrFromString(username)
 
 	var buf *byte
 	var bufSize uint32
 
 	ret, _, _ := procNetUserGetInfo.Call(
-		uintptr(unsafe.Pointer(serverName)),
+		0, // NULL for local computer
 		uintptr(unsafe.Pointer(userName)),
 		1, // INFO_LEVEL
 		uintptr(unsafe.Pointer(&buf)),
@@ -172,7 +171,7 @@ func userExists(username string) (bool, error) {
 	if ret == 0 {
 		// User exists
 		return true, nil
-	} else if ret == 2224 { // NERR_UserNotFound
+	} else if ret == 2221 { // NERR_UserNotFound
 		return false, nil
 	}
 
@@ -206,7 +205,6 @@ func containsSubstring(s, substr string) bool {
 }
 
 func createUserAccount(account ChildAccount) error {
-	serverName, _ := windows.UTF16PtrFromString("")
 	userName, _ := windows.UTF16PtrFromString(account.Username)
 	password, _ := windows.UTF16PtrFromString(account.Password)
 	fullName, _ := windows.UTF16PtrFromString(account.FullName)
@@ -221,7 +219,7 @@ func createUserAccount(account ChildAccount) error {
 
 	var parmErr uint32
 	ret, _, _ := procNetUserAdd.Call(
-		uintptr(unsafe.Pointer(serverName)),
+		0, // NULL for local computer
 		1, // INFO_LEVEL
 		uintptr(unsafe.Pointer(&userInfo)),
 		uintptr(unsafe.Pointer(&parmErr)),
@@ -277,9 +275,15 @@ func createUserAccountAlternative(account ChildAccount) error {
 }
 
 func addUserToGroup(username, groupName string) error {
-	serverName, _ := windows.UTF16PtrFromString("")
 	groupNamePtr, _ := windows.UTF16PtrFromString(groupName)
-	userNamePtr, _ := windows.UTF16PtrFromString(username)
+	// Use COMPUTERNAME\username for LOCALGROUP_MEMBERS_INFO_3
+	var compName [windows.MAX_COMPUTERNAME_LENGTH + 1]uint16
+	var size uint32 = windows.MAX_COMPUTERNAME_LENGTH + 1
+	if err := windows.GetComputerName(&compName[0], &size); err != nil {
+		return fmt.Errorf("GetComputerName failed: %v", err)
+	}
+	qualified := windows.UTF16ToString(compName[:size]) + "\\" + username
+	userNamePtr, _ := windows.UTF16PtrFromString(qualified)
 
 	// Create LOCALGROUP_MEMBERS_INFO_3 structure
 	memberInfo := struct {
@@ -289,7 +293,7 @@ func addUserToGroup(username, groupName string) error {
 	}
 
 	ret, _, _ := procNetLocalGroupAddMembers.Call(
-		uintptr(unsafe.Pointer(serverName)),
+		0, // NULL for local computer
 		uintptr(unsafe.Pointer(groupNamePtr)),
 		3, // INFO_LEVEL
 		uintptr(unsafe.Pointer(&memberInfo)),
@@ -297,7 +301,11 @@ func addUserToGroup(username, groupName string) error {
 	)
 
 	if ret != 0 {
-		return fmt.Errorf("NetLocalGroupAddMembers failed with code %d", ret)
+		// Fallback to net.exe when API fails (e.g., name format issues)
+		cmd := exec.Command("net", "localgroup", groupName, username, "/add")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("NetLocalGroupAddMembers failed with code %d; fallback failed: %v; output: %s", ret, err, string(out))
+		}
 	}
 
 	return nil
