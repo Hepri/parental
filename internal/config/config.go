@@ -138,8 +138,12 @@ func EnsureChildAccounts(config *Config) error {
 				fmt.Printf("✓ Created user account: %s\n", account.Username)
 			}
 
-			// Add to Users group
-			if err := addUserToGroup(account.Username, "Users"); err != nil {
+			// Add to Users group (localized name)
+			usersGroup, err := getBuiltinUsersGroupName()
+			if err != nil {
+				return fmt.Errorf("failed to resolve Users group name: %v", err)
+			}
+			if err := addUserToGroup(account.Username, usersGroup); err != nil {
 				return fmt.Errorf("failed to add user %s to Users group: %v", account.Username, err)
 			}
 
@@ -256,6 +260,26 @@ func getNetApiErrorMessage(errorCode uintptr) string {
 	}
 }
 
+// getBuiltinUsersGroupName returns the localized name of the built-in Users group
+func getBuiltinUsersGroupName() (string, error) {
+	// BUILTIN Users well-known SID: S-1-5-32-545
+	sid, err := windows.StringToSid("S-1-5-32-545")
+	if err != nil {
+		return "", fmt.Errorf("StringToSid failed: %v", err)
+	}
+	var nameLen uint32 = 0
+	var domainLen uint32 = 0
+	var use uint32
+	// First call to get required buffer sizes
+	_ = windows.LookupAccountSid(nil, sid, nil, &nameLen, nil, &domainLen, &use)
+	name := make([]uint16, nameLen)
+	domain := make([]uint16, domainLen)
+	if err := windows.LookupAccountSid(nil, sid, &name[0], &nameLen, &domain[0], &domainLen, &use); err != nil {
+		return "", fmt.Errorf("LookupAccountSid failed: %v", err)
+	}
+	return windows.UTF16ToString(name[:nameLen]), nil
+}
+
 func createUserAccountAlternative(account ChildAccount) error {
 	// Alternative method using net.exe command
 	cmd := exec.Command("net", "user", account.Username, account.Password, "/add", "/fullname:"+account.FullName, "/passwordchg:no", "/expires:never")
@@ -302,6 +326,11 @@ func addUserToGroup(username, groupName string) error {
 
 	if ret != 0 {
 		// Fallback to net.exe when API fails (e.g., name format issues)
+		// Use localized group name if possible
+		usersGroup, err := getBuiltinUsersGroupName()
+		if err == nil {
+			groupName = usersGroup
+		}
 		cmd := exec.Command("net", "localgroup", groupName, username, "/add")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("NetLocalGroupAddMembers failed with code %d; fallback failed: %v; output: %s", ret, err, string(out))
