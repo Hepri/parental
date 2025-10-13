@@ -139,9 +139,6 @@ func EnsureChildAccounts(config *Config) error {
 				if err2 := createUserAccountAlternative(account); err2 != nil {
 					return fmt.Errorf("failed to create user account %s: %v (alternative method also failed: %v)", account.Username, err, err2)
 				}
-				fmt.Printf("✓ Created user account using alternative method: %s\n", account.Username)
-			} else {
-				fmt.Printf("✓ Created user account: %s\n", account.Username)
 			}
 
 			// Add to Users group (localized name)
@@ -152,8 +149,7 @@ func EnsureChildAccounts(config *Config) error {
 			if err := addUserToGroup(account.Username, usersGroup); err != nil {
 				return fmt.Errorf("failed to add user %s to Users group: %v", account.Username, err)
 			}
-
-			fmt.Printf("✓ Created user account: %s\n", account.Username)
+			fmt.Printf("✓ Created user account and added to group: %s\n", account.Username)
 		} else {
 			fmt.Printf("✓ User account already exists: %s\n", account.Username)
 			// Ensure password matches config (reset if needed)
@@ -252,6 +248,9 @@ func createUserAccount(account ChildAccount) error {
 	)
 
 	if ret != 0 {
+		if ret == 2224 { // NERR_UserExists
+			return nil
+		}
 		errorMsg := getNetApiErrorMessage(ret)
 		return fmt.Errorf("NetUserAdd failed with code %d (parm error: %d): %s", ret, parmErr, errorMsg)
 	}
