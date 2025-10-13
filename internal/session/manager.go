@@ -132,26 +132,29 @@ func (m *Manager) GrantAccess(username string, duration time.Duration) error {
 			return fmt.Errorf("failed to log in user %s: %v", username, err)
 		}
 
-		// Wait a moment for session to be established
-		time.Sleep(2 * time.Second)
-
-		// Get the new session
-		sessions, err = m.getActiveSessions()
-		if err != nil {
-			return fmt.Errorf("failed to get updated sessions: %v", err)
-		}
-
-		for _, session := range sessions {
-			if session.State == WTSActive {
-				sessionUser, err := m.getSessionUsername(session.SessionID)
-				if err != nil {
-					continue
-				}
-				if sessionUser == username {
-					targetSession = &session
-					break
+		// Poll for session establishment (up to 30s)
+		deadline := time.Now().Add(30 * time.Second)
+		for time.Now().Before(deadline) {
+			sessions, err = m.getActiveSessions()
+			if err != nil {
+				return fmt.Errorf("failed to get updated sessions: %v", err)
+			}
+			for _, session := range sessions {
+				if session.State == WTSActive || session.State == WTSConnected {
+					sessionUser, err := m.getSessionUsername(session.SessionID)
+					if err != nil {
+						continue
+					}
+					if sessionUser == username {
+						targetSession = &session
+						break
+					}
 				}
 			}
+			if targetSession != nil {
+				break
+			}
+			time.Sleep(1 * time.Second)
 		}
 
 		if targetSession == nil {
