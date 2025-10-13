@@ -108,62 +108,7 @@ func (m *Manager) GrantAccess(username string, duration time.Duration) error {
 		return fmt.Errorf("child account %s not found", username)
 	}
 
-	// Check if user is already logged in
-	sessions, err := m.getActiveSessions()
-	if err != nil {
-		return fmt.Errorf("failed to get active sessions: %v", err)
-	}
-
-	var targetSession *WTS_SESSION_INFO
-	for _, session := range sessions {
-		if session.State == WTSActive {
-			// Get username for this session
-			sessionUser, err := m.getSessionUsername(session.SessionID)
-			if err != nil {
-				continue
-			}
-			if sessionUser == username {
-				targetSession = &session
-				break
-			}
-		}
-	}
-
-	if targetSession == nil {
-		// User is not logged in, need to log them in
-		if err := m.logInUser(account); err != nil {
-			return fmt.Errorf("failed to log in user %s: %v", username, err)
-		}
-
-		// Poll for session establishment (up to 30s)
-		deadline := time.Now().Add(30 * time.Second)
-		for time.Now().Before(deadline) {
-			sessions, err = m.getActiveSessions()
-			if err != nil {
-				return fmt.Errorf("failed to get updated sessions: %v", err)
-			}
-			for _, session := range sessions {
-				if session.State == WTSActive || session.State == WTSConnected {
-					sessionUser, err := m.getSessionUsername(session.SessionID)
-					if err != nil {
-						continue
-					}
-					if sessionUser == username {
-						targetSession = &session
-						break
-					}
-				}
-			}
-			if targetSession != nil {
-				break
-			}
-			time.Sleep(1 * time.Second)
-		}
-
-		if targetSession == nil {
-			return fmt.Errorf("failed to establish session for user %s", username)
-		}
-	}
+	// We no longer try to create/login the session automatically
 
 	// Change password to temporary simple one for manual login flow
 	if err := config.SetUserPassword(username, "123456"); err != nil {
@@ -178,7 +123,7 @@ func (m *Manager) GrantAccess(username string, duration time.Duration) error {
 		IsActive:  true,
 	}
 
-	log.Printf("Granted access to user %s for %v", username, duration)
+	log.Printf("Granted access to user %s for %v (temporary password set)", username, duration)
 	return nil
 }
 
