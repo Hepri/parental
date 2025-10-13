@@ -327,7 +327,9 @@ func (m *Manager) logInUser(account *config.ChildAccount) error {
 	username, _ := windows.UTF16PtrFromString(account.Username)
 	password, _ := windows.UTF16PtrFromString(account.Password)
 
-	appName, _ := windows.UTF16PtrFromString("C:\\Windows\\explorer.exe")
+	// Prefer userinit.exe to initialize user shell properly; fall back to explorer.exe where needed
+	appNameUserInit, _ := windows.UTF16PtrFromString("C:\\Windows\\System32\\userinit.exe")
+	appNameExplorer, _ := windows.UTF16PtrFromString("C:\\Windows\\explorer.exe")
 	cmdLine := (*uint16)(nil)
 
 	var startupInfo windows.StartupInfo
@@ -352,7 +354,7 @@ func (m *Manager) logInUser(account *config.ChildAccount) error {
 		0, // NULL domain
 		uintptr(unsafe.Pointer(password)),
 		LOGON_WITH_PROFILE,
-		uintptr(unsafe.Pointer(appName)),
+		uintptr(unsafe.Pointer(appNameUserInit)),
 		uintptr(unsafe.Pointer(cmdLine)),
 		CREATE_NEW_CONSOLE,
 		env, // Environment (0 = default for CreateProcessWithLogonW)
@@ -368,13 +370,28 @@ func (m *Manager) logInUser(account *config.ChildAccount) error {
 			uintptr(unsafe.Pointer(domainDot)),
 			uintptr(unsafe.Pointer(password)),
 			LOGON_WITH_PROFILE,
-			uintptr(unsafe.Pointer(appName)),
+			uintptr(unsafe.Pointer(appNameUserInit)),
 			uintptr(unsafe.Pointer(cmdLine)),
 			CREATE_NEW_CONSOLE,
 			0, 0,
 			uintptr(unsafe.Pointer(&startupInfo)),
 			uintptr(unsafe.Pointer(&processInfo)),
 		)
+		if ret == 0 {
+			// Try explorer.exe with local domain as another fallback
+			ret, _, _ = procCreateProcessWithLogon.Call(
+				uintptr(unsafe.Pointer(username)),
+				uintptr(unsafe.Pointer(domainDot)),
+				uintptr(unsafe.Pointer(password)),
+				LOGON_WITH_PROFILE,
+				uintptr(unsafe.Pointer(appNameExplorer)),
+				uintptr(unsafe.Pointer(cmdLine)),
+				CREATE_NEW_CONSOLE,
+				0, 0,
+				uintptr(unsafe.Pointer(&startupInfo)),
+				uintptr(unsafe.Pointer(&processInfo)),
+			)
+		}
 		if ret == 0 {
 			// Fallback: LogonUser + DuplicateTokenEx + SetTokenInformation(TokenSessionId) + CreateEnvironmentBlock + CreateProcessAsUser
 			userPtr, _ := windows.UTF16PtrFromString(account.Username)
@@ -444,7 +461,7 @@ func (m *Manager) logInUser(account *config.ChildAccount) error {
 			cr, _, cerr := procCreateProcessAsUser.Call(
 				uintptr(primaryToken),
 				0,
-				uintptr(unsafe.Pointer(appName)),
+				uintptr(unsafe.Pointer(appNameUserInit)),
 				0, 0, 0,
 				CREATE_UNICODE_ENVIRONMENT,
 				envPtr,
@@ -452,7 +469,20 @@ func (m *Manager) logInUser(account *config.ChildAccount) error {
 				uintptr(unsafe.Pointer(&pi)),
 			)
 			if cr == 0 {
-				return fmt.Errorf("CreateProcessAsUser failed: %v", cerr)
+				// Try explorer.exe as a last resort
+				cr, _, cerr = procCreateProcessAsUser.Call(
+					uintptr(primaryToken),
+					0,
+					uintptr(unsafe.Pointer(appNameExplorer)),
+					0, 0, 0,
+					CREATE_UNICODE_ENVIRONMENT,
+					envPtr,
+					uintptr(unsafe.Pointer(&si)),
+					uintptr(unsafe.Pointer(&pi)),
+				)
+				if cr == 0 {
+					return fmt.Errorf("CreateProcessAsUser failed: %v", cerr)
+				}
 			}
 			windows.CloseHandle(windows.Handle(pi.Process))
 			windows.CloseHandle(windows.Handle(pi.Thread))
