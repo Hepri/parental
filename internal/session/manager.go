@@ -36,6 +36,7 @@ var (
 	procWTSQuerySessionInformation = wtsapi32.NewProc("WTSQuerySessionInformationW")
 	procLogonUser                  = advapi32.NewProc("LogonUserW")
 	procCreateProcessAsUser        = advapi32.NewProc("CreateProcessAsUserW")
+	procCreateProcessWithLogon     = advapi32.NewProc("CreateProcessWithLogonW")
 	procWTSFreeMemory              = wtsapi32.NewProc("WTSFreeMemory")
 )
 
@@ -296,60 +297,99 @@ func (m *Manager) getSessionUsername(sessionID uint32) (string, error) {
 }
 
 func (m *Manager) logInUser(account *config.ChildAccount) error {
-	// This is a simplified implementation
-	// In a real implementation, you would need to:
-	// 1. Use LogonUser to authenticate
-	// 2. Use CreateProcessAsUser to start explorer.exe or similar
-	// 3. Handle the session creation properly
-
+	// Prefer CreateProcessWithLogonW which handles profile loading and session creation
 	username, _ := windows.UTF16PtrFromString(account.Username)
 	password, _ := windows.UTF16PtrFromString(account.Password)
-	domain, _ := windows.UTF16PtrFromString(".")
 
-	var token windows.Handle
-	ret, _, _ := procLogonUser.Call(
-		uintptr(unsafe.Pointer(username)),
-		uintptr(unsafe.Pointer(domain)),
-		uintptr(unsafe.Pointer(password)),
-		LOGON32_LOGON_INTERACTIVE,
-		LOGON32_PROVIDER_DEFAULT,
-		uintptr(unsafe.Pointer(&token)),
-	)
-
-	if ret == 0 {
-		return fmt.Errorf("LogonUser failed")
-	}
-	defer windows.CloseHandle(token)
-
-	// Start explorer.exe as the user
-	explorerPath, _ := windows.UTF16PtrFromString("C:\\Windows\\explorer.exe")
+	appName, _ := windows.UTF16PtrFromString("C:\\Windows\\explorer.exe")
+	cmdLine := (*uint16)(nil)
 
 	var startupInfo windows.StartupInfo
 	startupInfo.Cb = uint32(unsafe.Sizeof(startupInfo))
-
+	// Ensure interactive desktop
+	desktop, _ := windows.UTF16PtrFromString("winsta0\\default")
+	startupInfo.Desktop = desktop
 	var processInfo windows.ProcessInformation
 
-	ret, _, _ = procCreateProcessAsUser.Call(
-		uintptr(token),
-		0, // Application name
-		uintptr(unsafe.Pointer(explorerPath)),
-		0, // Process attributes
-		0, // Thread attributes
-		0, // Inherit handles
-		0, // Creation flags
+	// LOGON_WITH_PROFILE = 0x00000001
+	// CREATE_NEW_CONSOLE  = 0x00000010
+	const LOGON_WITH_PROFILE = 0x00000001
+	const CREATE_NEW_CONSOLE = 0x00000010
+
+	// Try with NULL domain (local account)
+	ret, _, _ := procCreateProcessWithLogon.Call(
+		uintptr(unsafe.Pointer(username)),
+		0, // NULL domain
+		uintptr(unsafe.Pointer(password)),
+		LOGON_WITH_PROFILE,
+		uintptr(unsafe.Pointer(appName)),
+		uintptr(unsafe.Pointer(cmdLine)),
+		CREATE_NEW_CONSOLE,
 		0, // Environment
 		0, // Current directory
 		uintptr(unsafe.Pointer(&startupInfo)),
 		uintptr(unsafe.Pointer(&processInfo)),
 	)
-
 	if ret == 0 {
-		return fmt.Errorf("CreateProcessAsUser failed")
+		// Try with explicit local domain "."
+		domainDot, _ := windows.UTF16PtrFromString(".")
+		ret, _, _ = procCreateProcessWithLogon.Call(
+			uintptr(unsafe.Pointer(username)),
+			uintptr(unsafe.Pointer(domainDot)),
+			uintptr(unsafe.Pointer(password)),
+			LOGON_WITH_PROFILE,
+			uintptr(unsafe.Pointer(appName)),
+			uintptr(unsafe.Pointer(cmdLine)),
+			CREATE_NEW_CONSOLE,
+			0, 0,
+			uintptr(unsafe.Pointer(&startupInfo)),
+			uintptr(unsafe.Pointer(&processInfo)),
+		)
+		if ret == 0 {
+			// Fallback: LogonUser + CreateProcessAsUser
+			userPtr, _ := windows.UTF16PtrFromString(account.Username)
+			passPtr, _ := windows.UTF16PtrFromString(account.Password)
+			domPtr, _ := windows.UTF16PtrFromString(".")
+			var token windows.Handle
+			lr, _, lerr := procLogonUser.Call(
+				uintptr(unsafe.Pointer(userPtr)),
+				uintptr(unsafe.Pointer(domPtr)),
+				uintptr(unsafe.Pointer(passPtr)),
+				LOGON32_LOGON_INTERACTIVE,
+				LOGON32_PROVIDER_DEFAULT,
+				uintptr(unsafe.Pointer(&token)),
+			)
+			if lr == 0 {
+				return fmt.Errorf("LogonUser failed: %v", lerr)
+			}
+			defer windows.CloseHandle(token)
+
+			// Create process as user
+			var si windows.StartupInfo
+			si.Cb = uint32(unsafe.Sizeof(si))
+			si.Desktop = desktop
+			var pi windows.ProcessInformation
+			cr, _, cerr := procCreateProcessAsUser.Call(
+				uintptr(token),
+				0,
+				uintptr(unsafe.Pointer(appName)),
+				0, 0, 0,
+				0,
+				0,
+				uintptr(unsafe.Pointer(&si)),
+				uintptr(unsafe.Pointer(&pi)),
+			)
+			if cr == 0 {
+				return fmt.Errorf("CreateProcessAsUser failed: %v", cerr)
+			}
+			windows.CloseHandle(windows.Handle(pi.Process))
+			windows.CloseHandle(windows.Handle(pi.Thread))
+			return nil
+		}
 	}
 
 	windows.CloseHandle(windows.Handle(processInfo.Process))
 	windows.CloseHandle(windows.Handle(processInfo.Thread))
-
 	return nil
 }
 
