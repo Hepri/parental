@@ -42,6 +42,7 @@ var (
 	procCreateProcessWithLogon       = advapi32.NewProc("CreateProcessWithLogonW")
 	procWTSFreeMemory                = wtsapi32.NewProc("WTSFreeMemory")
 	procWTSLogonUser                 = wtsapi32.NewProc("WTSLogonUserW")
+	procWTSLogoffSession             = wtsapi32.NewProc("WTSLogoffSession")
 	procDuplicateTokenEx             = advapi32.NewProc("DuplicateTokenEx")
 	procSetTokenInformation          = advapi32.NewProc("SetTokenInformation")
 	procCreateEnvironmentBlock       = userenv.NewProc("CreateEnvironmentBlock")
@@ -164,6 +165,11 @@ func (m *Manager) GrantAccess(username string, duration time.Duration) error {
 		}
 	}
 
+	// Change password to temporary simple one for manual login flow
+	if err := config.SetUserPassword(username, "123456"); err != nil {
+		return fmt.Errorf("failed to set temporary password: %v")
+	}
+
 	// Create active session record
 	m.activeSessions[username] = &ActiveSession{
 		Username:  username,
@@ -199,8 +205,22 @@ func (m *Manager) LockSession(username string) error {
 				continue
 			}
 			if sessionUser == username {
-				// Lock this session
-				return m.lockSessionByID(session.SessionID)
+				// Logoff this session
+				if err := m.logoffSessionByID(session.SessionID); err != nil {
+					return err
+				}
+				// Revert password to configured one
+				var configured string
+				for _, acc := range m.childAccounts {
+					if acc.Username == username {
+						configured = acc.Password
+						break
+					}
+				}
+				if configured != "" {
+					_ = config.SetUserPassword(username, configured)
+				}
+				return nil
 			}
 		}
 	}
@@ -235,8 +255,11 @@ func (m *Manager) LockAllSessions() error {
 			// Check if this is a child account
 			for _, account := range m.childAccounts {
 				if account.Username == sessionUser {
-					if err := m.lockSessionByID(session.SessionID); err != nil {
+					if err := m.logoffSessionByID(session.SessionID); err != nil {
 						log.Printf("Failed to lock session for %s: %v", sessionUser, err)
+					}
+					if account.Password != "" {
+						_ = config.SetUserPassword(sessionUser, account.Password)
 					}
 					break
 				}
@@ -366,6 +389,18 @@ func (m *Manager) lockSessionByID(sessionID uint32) error {
 	ret, _, _ := procLockWorkStation.Call()
 	if ret == 0 {
 		return fmt.Errorf("LockWorkStation failed")
+	}
+	return nil
+}
+
+func (m *Manager) logoffSessionByID(sessionID uint32) error {
+	r, _, _ := procWTSLogoffSession.Call(
+		WTS_CURRENT_SERVER_HANDLE,
+		uintptr(sessionID),
+		0,
+	)
+	if r == 0 {
+		return fmt.Errorf("WTSLogoffSession failed")
 	}
 	return nil
 }

@@ -160,7 +160,7 @@ func EnsureChildAccounts(config *Config) error {
 				}
 				config.ChildAccounts[i].Password = pwd
 			}
-			if err := setUserPassword(account.Username, config.ChildAccounts[i].Password); err != nil {
+			if err := SetUserPassword(account.Username, config.ChildAccounts[i].Password); err != nil {
 				return fmt.Errorf("failed to set password for %s: %v", account.Username, err)
 			}
 			// Ensure in Users group
@@ -258,7 +258,8 @@ func createUserAccount(account ChildAccount) error {
 	return nil
 }
 
-func setUserPassword(username, password string) error {
+// SetUserPassword sets a local user's password using NetUserSetInfo level 1003
+func SetUserPassword(username, password string) error {
 	// Use NetUserSetInfo level 1003 to set password
 	userName, _ := windows.UTF16PtrFromString(username)
 	passPtr, _ := windows.UTF16PtrFromString(password)
