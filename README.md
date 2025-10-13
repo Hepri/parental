@@ -148,19 +148,40 @@ parental-control-bot/
 └── README.md                 # This file
 ```
 
-## Troubleshooting
+## Debugging and Troubleshooting
+
+### Quick Diagnosis
+
+**Test configuration:**
+```cmd
+parental-control-bot.exe -test
+```
+
+**Run in debug mode:**
+```cmd
+parental-control-bot.exe -debug
+```
+
+**Check available commands:**
+```cmd
+parental-control-bot.exe
+```
 
 ### Service Won't Start
-1. Check Windows Event Log for errors
-2. Verify `config.json` exists and is valid
-3. Ensure bot token is correct
-4. Run as administrator
+1. **First, test configuration:** `parental-control-bot.exe -test`
+2. **Try debug mode:** `parental-control-bot.exe -debug`
+3. Check Windows Event Log for errors
+4. Verify `config.json` exists and is valid
+5. Ensure bot token is correct
+6. Run as administrator
 
 ### Bot Not Responding
-1. Verify Telegram bot token is correct
-2. Check if your user ID is in `authorized_user_ids`
-3. Ensure internet connection is working
-4. Check Windows Event Log for bot errors
+1. **Test connection:** `parental-control-bot.exe -test`
+2. **Debug mode:** `parental-control-bot.exe -debug`
+3. Verify Telegram bot token is correct
+4. Check if your user ID is in `authorized_user_ids`
+5. Ensure internet connection is working
+6. Check Windows Event Log for bot errors
 
 ### Child Account Issues
 1. Service automatically creates accounts on startup
@@ -172,6 +193,32 @@ parental-control-bot/
 1. Check if `time_tracking.json` is being created
 2. Verify service has permission to write files
 3. Check Windows Event Log for tracking errors
+
+### Debug Commands
+
+```cmd
+# Test configuration without starting service
+parental-control-bot.exe -test
+
+# Run in console mode for debugging
+parental-control-bot.exe -debug
+
+# Install as Windows service
+parental-control-bot.exe -install
+
+# Remove Windows service
+parental-control-bot.exe -uninstall
+```
+
+### Event Log Commands
+
+```cmd
+# Check service status
+sc query "Parental Control Bot Service"
+
+# View recent logs
+wevtutil qe Application /c:10 /rd:true /f:text /q:"*[System[Provider[@Name='ParentalControlBot']]]"
+```
 
 ## Uninstallation
 

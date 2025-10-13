@@ -77,6 +77,11 @@ func (tb *TelegramBot) Stop() {
 	log.Println("Telegram bot stopped")
 }
 
+// GetMe returns bot information for testing
+func (tb *TelegramBot) GetMe() (tgbotapi.User, error) {
+	return tb.bot.GetMe()
+}
+
 func (tb *TelegramBot) handleUpdate(update tgbotapi.Update) error {
 	if update.Message == nil && update.CallbackQuery == nil {
 		return nil

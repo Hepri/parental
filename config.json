@@ -1,0 +1,17 @@
+{
+  "telegram_bot_token": "YOUR_BOT_TOKEN_HERE",
+  "authorized_user_ids": [123456789],
+  "child_accounts": [
+    {
+      "username": "child1",
+      "full_name": "Child One",
+      "password": "auto-generated-on-creation"
+    },
+    {
+      "username": "child2", 
+      "full_name": "Child Two",
+      "password": "auto-generated-on-creation"
+    }
+  ],
+  "data_retention_days": 7
+}

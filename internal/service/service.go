@@ -196,3 +196,57 @@ func (s *ParentalControlService) cleanup() {
 
 	log.Println("Service cleanup completed")
 }
+
+// RunDebug runs the service in debug mode (not as Windows service)
+func (s *ParentalControlService) RunDebug(ctx context.Context) error {
+	fmt.Println("Initializing Parental Control Bot in debug mode...")
+
+	// Initialize service
+	if err := s.initialize(); err != nil {
+		return fmt.Errorf("failed to initialize service: %v", err)
+	}
+
+	fmt.Println("✓ Service initialized successfully")
+	fmt.Println("✓ Telegram bot started")
+	fmt.Println("✓ Time tracker started")
+	fmt.Println("✓ Session monitor started")
+	fmt.Println()
+	fmt.Println("Bot is running! You can now test it via Telegram.")
+	fmt.Println("Press Ctrl+C to stop...")
+
+	// Start background goroutines
+	go s.runBot()
+	go s.runTimeTracker()
+	go s.runSessionMonitor()
+
+	// Wait for context cancellation
+	<-ctx.Done()
+
+	fmt.Println("Shutting down debug mode...")
+	s.cleanup()
+	fmt.Println("Debug mode stopped")
+
+	return nil
+}
+
+// LoadConfigForTest loads configuration for testing purposes
+func LoadConfigForTest(configPath string) (*config.Config, error) {
+	return config.LoadConfig(configPath)
+}
+
+// TestBotConnection tests the Telegram bot connection
+func TestBotConnection(cfg *config.Config) (*bot.TelegramBot, error) {
+	// Create a minimal bot instance for testing
+	bot, err := bot.NewBot(cfg, nil, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Test the connection by getting bot info
+	_, err = bot.GetMe()
+	if err != nil {
+		return nil, err
+	}
+
+	return bot, nil
+}
