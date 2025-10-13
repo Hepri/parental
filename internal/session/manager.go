@@ -9,8 +9,9 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/Hepri/parental/internal/config"
 	"golang.org/x/sys/windows"
+
+	"github.com/Hepri/parental/internal/config"
 )
 
 type ActiveSession struct {
@@ -324,223 +325,38 @@ func (m *Manager) getSessionUsername(sessionID uint32) (string, error) {
 }
 
 func (m *Manager) logInUser(account *config.ChildAccount) error {
-	// Attempt to create a full Windows logon session similar to interactive login
-	username, _ := windows.UTF16PtrFromString(account.Username)
-	password, _ := windows.UTF16PtrFromString(account.Password)
+	u, _ := windows.UTF16PtrFromString(account.Username)
+	p, _ := windows.UTF16PtrFromString(account.Password)
+	app, _ := windows.UTF16PtrFromString("C:\\Windows\\explorer.exe")
 
-	// Prefer userinit.exe to initialize user shell properly; fall back to explorer.exe where needed
-	appNameUserInit, _ := windows.UTF16PtrFromString("C:\\Windows\\System32\\userinit.exe")
-	appNameExplorer, _ := windows.UTF16PtrFromString("C:\\Windows\\explorer.exe")
-	cmdLine := (*uint16)(nil)
-
-	var startupInfo windows.StartupInfo
-	startupInfo.Cb = uint32(unsafe.Sizeof(startupInfo))
-	// Ensure interactive desktop
+	var si windows.StartupInfo
+	si.Cb = uint32(unsafe.Sizeof(si))
 	desktop, _ := windows.UTF16PtrFromString("winsta0\\default")
-	startupInfo.Desktop = desktop
-	var processInfo windows.ProcessInformation
+	si.Desktop = desktop
+	var pi windows.ProcessInformation
 
-	// LOGON_WITH_PROFILE = 0x00000001
-	// CREATE_NEW_CONSOLE  = 0x00000010
-	const LOGON_WITH_PROFILE = 0x00000001
+	const LOGON_WITH_PROFILE = 1
+	const CREATE_UNICODE_ENVIRONMENT = 0x00000400
 	const CREATE_NEW_CONSOLE = 0x00000010
 
-	// First, try WTSLogonUser to create a real session, if available
-	if procWTSLogonUser.Find() == nil {
-		var userToken windows.Handle
-		wtsr, _, _ := procWTSLogonUser.Call(
-			WTS_CURRENT_SERVER_HANDLE,
-			0, // Reserved
-			uintptr(unsafe.Pointer(username)),
-			uintptr(unsafe.Pointer(password)),
-			2, // LOGON32_LOGON_INTERACTIVE
-			0, // LOGON32_PROVIDER_DEFAULT
-			uintptr(unsafe.Pointer(&userToken)),
-		)
-		if wtsr != 0 {
-			// Start userinit in that session via CreateProcessAsUser
-			var si windows.StartupInfo
-			si.Cb = uint32(unsafe.Sizeof(si))
-			desktop, _ := windows.UTF16PtrFromString("winsta0\\default")
-			si.Desktop = desktop
-			var pi windows.ProcessInformation
-			app, _ := windows.UTF16PtrFromString("C:\\Windows\\System32\\userinit.exe")
-			cr, _, _ := procCreateProcessAsUser.Call(
-				uintptr(userToken),
-				0,
-				uintptr(unsafe.Pointer(app)),
-				0, 0, 0,
-				0,
-				0,
-				uintptr(unsafe.Pointer(&si)),
-				uintptr(unsafe.Pointer(&pi)),
-			)
-			if cr != 0 {
-				windows.CloseHandle(windows.Handle(pi.Process))
-				windows.CloseHandle(windows.Handle(pi.Thread))
-				return nil
-			}
-			// If CreateProcessAsUser failed, fall through to other methods
-		}
-	}
-
-	// Try with NULL domain (local account) and proper environment/desktop
-	// Build environment block for the user to avoid 0xC0000142 (DLL init failed)
-	var env uintptr
-	// CreateProcessWithLogonW ignores lpEnvironment unless CREATE_UNICODE_ENVIRONMENT is set
-	// Let Windows build environment automatically by passing 0 for env here; if needed, we can switch to CreateEnvironmentBlock with CreateProcessAsUser path.
-	ret, _, _ := procCreateProcessWithLogon.Call(
-		uintptr(unsafe.Pointer(username)),
-		0, // NULL domain
-		uintptr(unsafe.Pointer(password)),
+	r, _, err := procCreateProcessWithLogon.Call(
+		uintptr(unsafe.Pointer(u)),
+		0,
+		uintptr(unsafe.Pointer(p)),
 		LOGON_WITH_PROFILE,
-		uintptr(unsafe.Pointer(appNameUserInit)),
-		uintptr(unsafe.Pointer(cmdLine)),
-		CREATE_NEW_CONSOLE,
-		env, // Environment (0 = default for CreateProcessWithLogonW)
-		0,   // Current directory
-		uintptr(unsafe.Pointer(&startupInfo)),
-		uintptr(unsafe.Pointer(&processInfo)),
+		uintptr(unsafe.Pointer(app)),
+		0,
+		CREATE_UNICODE_ENVIRONMENT|CREATE_NEW_CONSOLE,
+		0, 0,
+		uintptr(unsafe.Pointer(&si)),
+		uintptr(unsafe.Pointer(&pi)),
 	)
-	if ret == 0 {
-		// Try with explicit local domain "."
-		domainDot, _ := windows.UTF16PtrFromString(".")
-		ret, _, _ = procCreateProcessWithLogon.Call(
-			uintptr(unsafe.Pointer(username)),
-			uintptr(unsafe.Pointer(domainDot)),
-			uintptr(unsafe.Pointer(password)),
-			LOGON_WITH_PROFILE,
-			uintptr(unsafe.Pointer(appNameUserInit)),
-			uintptr(unsafe.Pointer(cmdLine)),
-			CREATE_NEW_CONSOLE,
-			0, 0,
-			uintptr(unsafe.Pointer(&startupInfo)),
-			uintptr(unsafe.Pointer(&processInfo)),
-		)
-		if ret == 0 {
-			// Try explorer.exe with local domain as another fallback
-			ret, _, _ = procCreateProcessWithLogon.Call(
-				uintptr(unsafe.Pointer(username)),
-				uintptr(unsafe.Pointer(domainDot)),
-				uintptr(unsafe.Pointer(password)),
-				LOGON_WITH_PROFILE,
-				uintptr(unsafe.Pointer(appNameExplorer)),
-				uintptr(unsafe.Pointer(cmdLine)),
-				CREATE_NEW_CONSOLE,
-				0, 0,
-				uintptr(unsafe.Pointer(&startupInfo)),
-				uintptr(unsafe.Pointer(&processInfo)),
-			)
-		}
-		if ret == 0 {
-			// Fallback: LogonUser + DuplicateTokenEx + SetTokenInformation(TokenSessionId) + CreateEnvironmentBlock + CreateProcessAsUser
-			userPtr, _ := windows.UTF16PtrFromString(account.Username)
-			passPtr, _ := windows.UTF16PtrFromString(account.Password)
-			domPtr, _ := windows.UTF16PtrFromString(".")
-			var token windows.Handle
-			lr, _, lerr := procLogonUser.Call(
-				uintptr(unsafe.Pointer(userPtr)),
-				uintptr(unsafe.Pointer(domPtr)),
-				uintptr(unsafe.Pointer(passPtr)),
-				LOGON32_LOGON_INTERACTIVE,
-				LOGON32_PROVIDER_DEFAULT,
-				uintptr(unsafe.Pointer(&token)),
-			)
-			if lr == 0 {
-				return fmt.Errorf("LogonUser failed: %v", lerr)
-			}
-			defer windows.CloseHandle(token)
-
-			// Duplicate token with primary type
-			var primaryToken windows.Handle
-			const SecurityImpersonation = 2
-			const TokenPrimary = 1
-			dr, _, derr := procDuplicateTokenEx.Call(
-				uintptr(token),
-				windows.MAXIMUM_ALLOWED,
-				0,
-				SecurityImpersonation,
-				TokenPrimary,
-				uintptr(unsafe.Pointer(&primaryToken)),
-			)
-			if dr == 0 {
-				return fmt.Errorf("DuplicateTokenEx failed: %v", derr)
-			}
-			defer windows.CloseHandle(primaryToken)
-
-			// Load user profile (ensures registry hive and proper env variables)
-			var pinfo profileInfo
-			pinfo.Size = uint32(unsafe.Sizeof(pinfo))
-			pinfo.UserName = userPtr
-			_, _, _ = procLoadUserProfile.Call(
-				uintptr(primaryToken),
-				uintptr(unsafe.Pointer(&pinfo)),
-			)
-
-			// Assign console session ID to token
-			sidR, _, _ := procWTSGetActiveConsoleSessionId.Call()
-			sessionId := uint32(sidR)
-			_, _, _ = procSetTokenInformation.Call(
-				uintptr(primaryToken),
-				TokenSessionId,
-				uintptr(unsafe.Pointer(&sessionId)),
-				unsafe.Sizeof(sessionId),
-			)
-			// Build environment for this token
-			var envPtr uintptr
-			_, _, _ = procCreateEnvironmentBlock.Call(
-				uintptr(unsafe.Pointer(&envPtr)),
-				uintptr(primaryToken),
-				0,
-			)
-			// Create process as user with environment and desktop
-			var si windows.StartupInfo
-			si.Cb = uint32(unsafe.Sizeof(si))
-			si.Desktop = desktop
-			var pi windows.ProcessInformation
-			cr, _, cerr := procCreateProcessAsUser.Call(
-				uintptr(primaryToken),
-				0,
-				uintptr(unsafe.Pointer(appNameUserInit)),
-				0, 0, 0,
-				CREATE_UNICODE_ENVIRONMENT,
-				envPtr,
-				uintptr(unsafe.Pointer(&si)),
-				uintptr(unsafe.Pointer(&pi)),
-			)
-			if cr == 0 {
-				// Try explorer.exe as a last resort
-				cr, _, cerr = procCreateProcessAsUser.Call(
-					uintptr(primaryToken),
-					0,
-					uintptr(unsafe.Pointer(appNameExplorer)),
-					0, 0, 0,
-					CREATE_UNICODE_ENVIRONMENT,
-					envPtr,
-					uintptr(unsafe.Pointer(&si)),
-					uintptr(unsafe.Pointer(&pi)),
-				)
-				if cr == 0 {
-					return fmt.Errorf("CreateProcessAsUser failed: %v", cerr)
-				}
-			}
-			windows.CloseHandle(windows.Handle(pi.Process))
-			windows.CloseHandle(windows.Handle(pi.Thread))
-			if envPtr != 0 {
-				_, _, _ = procDestroyEnvironmentBlock.Call(envPtr)
-			}
-			if pinfo.hProfile != 0 {
-				_, _, _ = procUnloadUserProfile.Call(
-					uintptr(primaryToken),
-					uintptr(pinfo.hProfile),
-				)
-			}
-			return nil
-		}
+	if r == 0 {
+		return fmt.Errorf("CreateProcessWithLogonW failed: %v", err)
 	}
 
-	windows.CloseHandle(windows.Handle(processInfo.Process))
-	windows.CloseHandle(windows.Handle(processInfo.Thread))
+	windows.CloseHandle(pi.Process)
+	windows.CloseHandle(pi.Thread)
 	return nil
 }
 
