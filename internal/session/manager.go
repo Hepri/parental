@@ -30,26 +30,35 @@ var (
 	user32   = windows.NewLazySystemDLL("user32.dll")
 	wtsapi32 = windows.NewLazySystemDLL("wtsapi32.dll")
 	advapi32 = windows.NewLazySystemDLL("advapi32.dll")
+	userenv  = windows.NewLazySystemDLL("userenv.dll")
+	kernel32 = windows.NewLazySystemDLL("kernel32.dll")
 
-	procLockWorkStation            = user32.NewProc("LockWorkStation")
-	procWTSEnumerateSessions       = wtsapi32.NewProc("WTSEnumerateSessionsW")
-	procWTSQuerySessionInformation = wtsapi32.NewProc("WTSQuerySessionInformationW")
-	procLogonUser                  = advapi32.NewProc("LogonUserW")
-	procCreateProcessAsUser        = advapi32.NewProc("CreateProcessAsUserW")
-	procCreateProcessWithLogon     = advapi32.NewProc("CreateProcessWithLogonW")
-	procWTSFreeMemory              = wtsapi32.NewProc("WTSFreeMemory")
+	procLockWorkStation              = user32.NewProc("LockWorkStation")
+	procWTSEnumerateSessions         = wtsapi32.NewProc("WTSEnumerateSessionsW")
+	procWTSQuerySessionInformation   = wtsapi32.NewProc("WTSQuerySessionInformationW")
+	procLogonUser                    = advapi32.NewProc("LogonUserW")
+	procCreateProcessAsUser          = advapi32.NewProc("CreateProcessAsUserW")
+	procCreateProcessWithLogon       = advapi32.NewProc("CreateProcessWithLogonW")
+	procWTSFreeMemory                = wtsapi32.NewProc("WTSFreeMemory")
+	procDuplicateTokenEx             = advapi32.NewProc("DuplicateTokenEx")
+	procSetTokenInformation          = advapi32.NewProc("SetTokenInformation")
+	procCreateEnvironmentBlock       = userenv.NewProc("CreateEnvironmentBlock")
+	procDestroyEnvironmentBlock      = userenv.NewProc("DestroyEnvironmentBlock")
+	procWTSGetActiveConsoleSessionId = kernel32.NewProc("WTSGetActiveConsoleSessionId")
 )
 
 const (
-	WTS_CURRENT_SERVER_HANDLE = 0
-	WTSActive                 = 0
-	WTSDisconnected           = 1
-	WTSConnected              = 2
-	WTSConnectState           = 8
-	WTSUserName               = 5
-	WTSDomainName             = 7
-	LOGON32_LOGON_INTERACTIVE = 2
-	LOGON32_PROVIDER_DEFAULT  = 0
+	WTS_CURRENT_SERVER_HANDLE  = 0
+	WTSActive                  = 0
+	WTSDisconnected            = 1
+	WTSConnected               = 2
+	WTSConnectState            = 8
+	WTSUserName                = 5
+	WTSDomainName              = 7
+	LOGON32_LOGON_INTERACTIVE  = 2
+	LOGON32_PROVIDER_DEFAULT   = 0
+	CREATE_UNICODE_ENVIRONMENT = 0x00000400
+	TokenSessionId             = 12
 )
 
 type WTS_SESSION_INFO struct {
@@ -316,7 +325,11 @@ func (m *Manager) logInUser(account *config.ChildAccount) error {
 	const LOGON_WITH_PROFILE = 0x00000001
 	const CREATE_NEW_CONSOLE = 0x00000010
 
-	// Try with NULL domain (local account)
+	// Try with NULL domain (local account) and proper environment/desktop
+	// Build environment block for the user to avoid 0xC0000142 (DLL init failed)
+	var env uintptr
+	// CreateProcessWithLogonW ignores lpEnvironment unless CREATE_UNICODE_ENVIRONMENT is set
+	// Let Windows build environment automatically by passing 0 for env here; if needed, we can switch to CreateEnvironmentBlock with CreateProcessAsUser path.
 	ret, _, _ := procCreateProcessWithLogon.Call(
 		uintptr(unsafe.Pointer(username)),
 		0, // NULL domain
@@ -325,8 +338,8 @@ func (m *Manager) logInUser(account *config.ChildAccount) error {
 		uintptr(unsafe.Pointer(appName)),
 		uintptr(unsafe.Pointer(cmdLine)),
 		CREATE_NEW_CONSOLE,
-		0, // Environment
-		0, // Current directory
+		env, // Environment (0 = default for CreateProcessWithLogonW)
+		0,   // Current directory
 		uintptr(unsafe.Pointer(&startupInfo)),
 		uintptr(unsafe.Pointer(&processInfo)),
 	)
@@ -346,7 +359,7 @@ func (m *Manager) logInUser(account *config.ChildAccount) error {
 			uintptr(unsafe.Pointer(&processInfo)),
 		)
 		if ret == 0 {
-			// Fallback: LogonUser + CreateProcessAsUser
+			// Fallback: LogonUser + DuplicateTokenEx + SetTokenInformation(TokenSessionId) + CreateEnvironmentBlock + CreateProcessAsUser
 			userPtr, _ := windows.UTF16PtrFromString(account.Username)
 			passPtr, _ := windows.UTF16PtrFromString(account.Password)
 			domPtr, _ := windows.UTF16PtrFromString(".")
@@ -364,18 +377,51 @@ func (m *Manager) logInUser(account *config.ChildAccount) error {
 			}
 			defer windows.CloseHandle(token)
 
-			// Create process as user
+			// Duplicate token with primary type
+			var primaryToken windows.Handle
+			const SecurityImpersonation = 2
+			const TokenPrimary = 1
+			dr, _, derr := procDuplicateTokenEx.Call(
+				uintptr(token),
+				windows.MAXIMUM_ALLOWED,
+				0,
+				SecurityImpersonation,
+				TokenPrimary,
+				uintptr(unsafe.Pointer(&primaryToken)),
+			)
+			if dr == 0 {
+				return fmt.Errorf("DuplicateTokenEx failed: %v", derr)
+			}
+			defer windows.CloseHandle(primaryToken)
+
+			// Assign console session ID to token
+			sidR, _, _ := procWTSGetActiveConsoleSessionId.Call()
+			sessionId := uint32(sidR)
+			_, _, _ = procSetTokenInformation.Call(
+				uintptr(primaryToken),
+				TokenSessionId,
+				uintptr(unsafe.Pointer(&sessionId)),
+				unsafe.Sizeof(sessionId),
+			)
+			// Build environment for this token
+			var envPtr uintptr
+			_, _, _ = procCreateEnvironmentBlock.Call(
+				uintptr(unsafe.Pointer(&envPtr)),
+				uintptr(primaryToken),
+				0,
+			)
+			// Create process as user with environment and desktop
 			var si windows.StartupInfo
 			si.Cb = uint32(unsafe.Sizeof(si))
 			si.Desktop = desktop
 			var pi windows.ProcessInformation
 			cr, _, cerr := procCreateProcessAsUser.Call(
-				uintptr(token),
+				uintptr(primaryToken),
 				0,
 				uintptr(unsafe.Pointer(appName)),
 				0, 0, 0,
-				0,
-				0,
+				CREATE_UNICODE_ENVIRONMENT,
+				envPtr,
 				uintptr(unsafe.Pointer(&si)),
 				uintptr(unsafe.Pointer(&pi)),
 			)
@@ -384,6 +430,9 @@ func (m *Manager) logInUser(account *config.ChildAccount) error {
 			}
 			windows.CloseHandle(windows.Handle(pi.Process))
 			windows.CloseHandle(windows.Handle(pi.Thread))
+			if envPtr != 0 {
+				_, _, _ = procDestroyEnvironmentBlock.Call(envPtr)
+			}
 			return nil
 		}
 	}
