@@ -527,7 +527,7 @@ func (tb *TelegramBot) handleLockSession(data string, chatID int64, messageID in
 		return err
 	}
 
-	msgText := fmt.Sprintf("🔒 *Сеанс завершён*\n\nПользователь %s вышел из системы, пароль восстановлен.", username)
+	msgText := fmt.Sprintf("🔒 *Экран заблокирован*\n\nПользователь %s заблокирован, пароль восстановлен.", username)
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, msgText)
 	editMsg.ParseMode = "Markdown"
 	editMsg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{
@@ -571,7 +571,7 @@ func (tb *TelegramBot) handleLockAllNow(chatID int64, messageID int) error {
 		tb.bot.Send(msg)
 		return err
 	}
-	msg := tgbotapi.NewEditMessageText(chatID, messageID, "🔒 Все детские сеансы завершены, пароли восстановлены.")
+	msg := tgbotapi.NewEditMessageText(chatID, messageID, "🔒 Все детские сеансы заблокированы, пароли восстановлены.")
 	msg.ParseMode = "Markdown"
 	msg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{
 		InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{

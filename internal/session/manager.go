@@ -44,6 +44,7 @@ var (
 	procWTSFreeMemory                = wtsapi32.NewProc("WTSFreeMemory")
 	procWTSLogonUser                 = wtsapi32.NewProc("WTSLogonUserW")
 	procWTSLogoffSession             = wtsapi32.NewProc("WTSLogoffSession")
+	procWTSDisconnectSession         = wtsapi32.NewProc("WTSDisconnectSession")
 	procDuplicateTokenEx             = advapi32.NewProc("DuplicateTokenEx")
 	procSetTokenInformation          = advapi32.NewProc("SetTokenInformation")
 	procCreateEnvironmentBlock       = userenv.NewProc("CreateEnvironmentBlock")
@@ -196,10 +197,10 @@ func (m *Manager) LockSession(username string) error {
 				continue
 			}
 			if sessionUser == username {
-				// Logoff this session
-				if err := m.logoffSessionByID(session.SessionID); err != nil {
+				// Disconnect (lock) this session so apps keep running
+				if err := m.disconnectSessionByID(session.SessionID); err != nil {
 					// Even if logoff fails, still revert password below
-					log.Printf("Logoff failed for %s: %v", username, err)
+					log.Printf("Disconnect failed for %s: %v", username, err)
 				}
 				// Revert password to configured one (always)
 				var configured string
@@ -264,8 +265,8 @@ func (m *Manager) LockAllSessions() error {
 			// Check if this is a child account
 			for _, account := range m.childAccounts {
 				if account.Username == sessionUser {
-					if err := m.logoffSessionByID(session.SessionID); err != nil {
-						log.Printf("Failed to lock session for %s: %v", sessionUser, err)
+					if err := m.disconnectSessionByID(session.SessionID); err != nil {
+						log.Printf("Failed to disconnect session for %s: %v", sessionUser, err)
 					}
 					if account.Password != "" {
 						_ = config.SetUserPassword(sessionUser, account.Password)
@@ -453,6 +454,19 @@ func (m *Manager) logoffSessionByID(sessionID uint32) error {
 	)
 	if r == 0 {
 		return fmt.Errorf("WTSLogoffSession failed")
+	}
+	return nil
+}
+
+func (m *Manager) disconnectSessionByID(sessionID uint32) error {
+	r, _, _ := procWTSDisconnectSession.Call(
+		WTS_CURRENT_SERVER_HANDLE,
+		uintptr(sessionID),
+		0,
+	)
+	if r == 0 {
+		// Best-effort fallback to local lock
+		_, _, _ = procLockWorkStation.Call()
 	}
 	return nil
 }
