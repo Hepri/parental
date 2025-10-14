@@ -24,6 +24,7 @@ type ActiveSession struct {
 type Manager struct {
 	childAccounts  []config.ChildAccount
 	activeSessions map[string]*ActiveSession
+	timers         map[string]*time.Timer
 	mutex          sync.RWMutex
 }
 
@@ -88,6 +89,7 @@ func NewManager(childAccounts []config.ChildAccount) (*Manager, error) {
 	return &Manager{
 		childAccounts:  childAccounts,
 		activeSessions: make(map[string]*ActiveSession),
+		timers:         make(map[string]*time.Timer),
 	}, nil
 }
 
@@ -115,13 +117,23 @@ func (m *Manager) GrantAccess(username string, duration time.Duration) error {
 		return fmt.Errorf("failed to set temporary password: %v")
 	}
 
-	// Create active session record
+	// Create/update active session record
 	m.activeSessions[username] = &ActiveSession{
 		Username:  username,
 		StartTime: time.Now(),
 		Duration:  duration,
 		IsActive:  true,
 	}
+
+	// Cancel existing timer if any
+	if t, ok := m.timers[username]; ok {
+		t.Stop()
+		delete(m.timers, username)
+	}
+	// Schedule exact expiry lock
+	m.timers[username] = time.AfterFunc(duration, func() {
+		_ = m.LockSession(username)
+	})
 
 	log.Printf("Granted access to user %s for %v (temporary password set)", username, duration)
 	return nil
@@ -135,6 +147,12 @@ func (m *Manager) LockSession(username string) error {
 	if session, exists := m.activeSessions[username]; exists {
 		session.IsActive = false
 		delete(m.activeSessions, username)
+	}
+
+	// Stop and remove any timer
+	if t, ok := m.timers[username]; ok {
+		t.Stop()
+		delete(m.timers, username)
 	}
 
 	// Get active sessions to find the user's session
@@ -152,9 +170,10 @@ func (m *Manager) LockSession(username string) error {
 			if sessionUser == username {
 				// Logoff this session
 				if err := m.logoffSessionByID(session.SessionID); err != nil {
-					return err
+					// Even if logoff fails, still revert password below
+					log.Printf("Logoff failed for %s: %v", username, err)
 				}
-				// Revert password to configured one
+				// Revert password to configured one (always)
 				var configured string
 				for _, acc := range m.childAccounts {
 					if acc.Username == username {
@@ -170,7 +189,18 @@ func (m *Manager) LockSession(username string) error {
 		}
 	}
 
-	return fmt.Errorf("user %s session not found", username)
+	// Session not found: just revert password and succeed
+	var configured string
+	for _, acc := range m.childAccounts {
+		if acc.Username == username {
+			configured = acc.Password
+			break
+		}
+	}
+	if configured != "" {
+		_ = config.SetUserPassword(username, configured)
+	}
+	return nil
 }
 
 func (m *Manager) LockAllSessions() error {
@@ -183,6 +213,12 @@ func (m *Manager) LockAllSessions() error {
 		log.Printf("Locked session for user %s", username)
 	}
 	m.activeSessions = make(map[string]*ActiveSession)
+
+	// Stop and clear all timers
+	for u, t := range m.timers {
+		t.Stop()
+		delete(m.timers, u)
+	}
 
 	// Lock all child account sessions
 	sessions, err := m.getActiveSessions()

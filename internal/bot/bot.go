@@ -163,6 +163,8 @@ func (tb *TelegramBot) handleCallbackQuery(query *tgbotapi.CallbackQuery) error 
 		return tb.handleDurationSelection(data, chatID, messageID)
 	case strings.HasPrefix(data, "lock_"):
 		return tb.handleLockSession(data, chatID, messageID)
+	case strings.HasPrefix(data, "resetpw_"):
+		return tb.handleResetPassword(data, chatID, messageID)
 	case data == "stats_menu":
 		return tb.showStatsMenu(chatID, messageID)
 	case data == "stats_today":
@@ -179,6 +181,8 @@ func (tb *TelegramBot) handleCallbackQuery(query *tgbotapi.CallbackQuery) error 
 		return tb.scheduleShutdown(data, chatID, messageID)
 	case data == "cancel_shutdown":
 		return tb.cancelShutdown(chatID, messageID)
+	case data == "resetpw_menu":
+		return tb.showResetPasswordMenu(chatID, messageID)
 	case data == "main_menu":
 		return tb.showMainMenu(chatID)
 	default:
@@ -195,6 +199,9 @@ func (tb *TelegramBot) showMainMenu(chatID int64) error {
 			tgbotapi.NewInlineKeyboardButtonData("🔒 Завершить сеанс", "lock_menu"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🔁 Сбросить пароль", "resetpw_menu"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("📊 Статистика", "stats_menu"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
@@ -206,6 +213,71 @@ func (tb *TelegramBot) showMainMenu(chatID int64) error {
 	msg.ParseMode = "Markdown"
 	msg.ReplyMarkup = keyboard
 
+	_, err := tb.bot.Send(msg)
+	return err
+}
+
+func (tb *TelegramBot) showResetPasswordMenu(chatID int64, messageID int) error {
+	var buttons [][]tgbotapi.InlineKeyboardButton
+
+	for _, account := range tb.config.ChildAccounts {
+		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(account.FullName, "resetpw_"+account.Username),
+		))
+	}
+
+	buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu"),
+	))
+
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(buttons...)
+
+	if messageID > 0 {
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "🔁 *Сброс пароля*\n\nВыберите аккаунт ребёнка для восстановления пароля из конфигурации:")
+		editMsg.ParseMode = "Markdown"
+		editMsg.ReplyMarkup = &keyboard
+		_, err := tb.bot.Send(editMsg)
+		return err
+	}
+
+	msg := tgbotapi.NewMessage(chatID, "🔁 *Сброс пароля*\n\nВыберите аккаунт ребёнка для восстановления пароля из конфигурации:")
+	msg.ParseMode = "Markdown"
+	msg.ReplyMarkup = keyboard
+	_, err := tb.bot.Send(msg)
+	return err
+}
+
+func (tb *TelegramBot) handleResetPassword(data string, chatID int64, messageID int) error {
+	// data format: resetpw_<username>
+	username := strings.TrimPrefix(data, "resetpw_")
+
+	var configured string
+	for _, acc := range tb.config.ChildAccounts {
+		if acc.Username == username {
+			configured = acc.Password
+			break
+		}
+	}
+
+	if configured == "" {
+		msg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Не найден пароль в конфигурации для выбранного пользователя.")
+		tb.bot.Send(msg)
+		return fmt.Errorf("configured password not found")
+	}
+
+	if err := config.SetUserPassword(username, configured); err != nil {
+		msg := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf("❌ Не удалось сбросить пароль для %s: %v", username, err))
+		tb.bot.Send(msg)
+		return err
+	}
+
+	msg := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf("✅ Пароль для %s успешно восстановлен.", username))
+	msg.ParseMode = "Markdown"
+	msg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{
+		InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
+			{tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu")},
+		},
+	}
 	_, err := tb.bot.Send(msg)
 	return err
 }
