@@ -163,6 +163,8 @@ func (tb *TelegramBot) handleCallbackQuery(query *tgbotapi.CallbackQuery) error 
 		return tb.handleDurationSelection(data, chatID, messageID)
 	case strings.HasPrefix(data, "lock_"):
 		return tb.handleLockSession(data, chatID, messageID)
+	case data == "lock_all":
+		return tb.handleLockAllNow(chatID, messageID)
 	case data == "resetpw_all":
 		return tb.handleResetAllPasswords(chatID, messageID)
 	case strings.HasPrefix(data, "resetpw_"):
@@ -198,7 +200,7 @@ func (tb *TelegramBot) showMainMenu(chatID int64) error {
 			tgbotapi.NewInlineKeyboardButtonData("🟢 Выдать доступ", "grant_menu"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🔒 Завершить сеанс", "lock_menu"),
+			tgbotapi.NewInlineKeyboardButtonData("🔒 Завершить сеанс", "lock_all"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("🔁 Сбросить пароль", "resetpw_menu"),
@@ -533,6 +535,26 @@ func (tb *TelegramBot) handleLockSession(data string, chatID int64, messageID in
 	}
 
 	_, err = tb.bot.Send(editMsg)
+	return err
+}
+
+func (tb *TelegramBot) handleLockAllNow(chatID int64, messageID int) error {
+	if tb.sessionMgr == nil {
+		return nil
+	}
+	if err := tb.sessionMgr.ForceLogoffAllChildSessions(); err != nil {
+		msg := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf("❌ Не удалось завершить все сеансы: %v", err))
+		tb.bot.Send(msg)
+		return err
+	}
+	msg := tgbotapi.NewEditMessageText(chatID, messageID, "🔒 Все детские сеансы завершены, пароли восстановлены.")
+	msg.ParseMode = "Markdown"
+	msg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{
+		InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
+			{tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu")},
+		},
+	}
+	_, err := tb.bot.Send(msg)
 	return err
 }
 

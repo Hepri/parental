@@ -251,6 +251,49 @@ func (m *Manager) LockAllSessions() error {
 	return nil
 }
 
+// ForceLogoffAllChildSessions logs off all sessions for configured child accounts,
+// regardless of whether they are tracked internally. It also reverts passwords and
+// clears timers and active session records.
+func (m *Manager) ForceLogoffAllChildSessions() error {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	// Stop timers and clear in-memory sessions
+	for u, t := range m.timers {
+		t.Stop()
+		delete(m.timers, u)
+	}
+	m.activeSessions = make(map[string]*ActiveSession)
+
+	// Enumerate all sessions and logoff child accounts
+	sessions, err := m.getActiveSessions()
+	if err != nil {
+		return fmt.Errorf("failed to enumerate sessions: %v", err)
+	}
+
+	for _, s := range sessions {
+		sessionUser, err := m.getSessionUsername(s.SessionID)
+		if err != nil || sessionUser == "" {
+			continue
+		}
+		for _, acc := range m.childAccounts {
+			if acc.Username == sessionUser {
+				_ = m.logoffSessionByID(s.SessionID)
+				break
+			}
+		}
+	}
+
+	// Revert passwords for all children to configured values
+	for _, acc := range m.childAccounts {
+		if acc.Password != "" {
+			_ = config.SetUserPassword(acc.Username, acc.Password)
+		}
+	}
+
+	return nil
+}
+
 func (m *Manager) GetActiveSessions() map[string]*ActiveSession {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
