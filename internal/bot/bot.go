@@ -157,14 +157,14 @@ func (tb *TelegramBot) handleCallbackQuery(query *tgbotapi.CallbackQuery) error 
 	tb.bot.Request(callback)
 
 	switch {
+	case data == "lock_all":
+		return tb.handleLockAllNow(chatID, messageID)
 	case strings.HasPrefix(data, "grant_"):
 		return tb.handleGrantAccess(data, chatID, messageID)
 	case strings.HasPrefix(data, "duration_"):
 		return tb.handleDurationSelection(data, chatID, messageID)
 	case strings.HasPrefix(data, "lock_"):
 		return tb.handleLockSession(data, chatID, messageID)
-	case data == "lock_all":
-		return tb.handleLockAllNow(chatID, messageID)
 	case data == "resetpw_all":
 		return tb.handleResetAllPasswords(chatID, messageID)
 	case strings.HasPrefix(data, "resetpw_"):
