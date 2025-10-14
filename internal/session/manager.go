@@ -139,6 +139,34 @@ func (m *Manager) GrantAccess(username string, duration time.Duration) error {
 	return nil
 }
 
+// ExtendSession increases the remaining time for an active session and reschedules the timer.
+func (m *Manager) ExtendSession(username string, extra time.Duration) error {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	session, exists := m.activeSessions[username]
+	if !exists || !session.IsActive {
+		return fmt.Errorf("no active session for %s", username)
+	}
+
+	// Increase total allowed duration
+	session.Duration += extra
+
+	// Reschedule timer
+	if t, ok := m.timers[username]; ok {
+		t.Stop()
+		delete(m.timers, username)
+	}
+	remaining := session.StartTime.Add(session.Duration).Sub(time.Now())
+	if remaining <= 0 {
+		// If already expired after extension calculation, immediately lock
+		go func(u string) { _ = m.LockSession(u) }(username)
+		return nil
+	}
+	m.timers[username] = time.AfterFunc(remaining, func() { _ = m.LockSession(username) })
+	return nil
+}
+
 func (m *Manager) LockSession(username string) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()

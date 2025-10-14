@@ -165,6 +165,8 @@ func (tb *TelegramBot) handleCallbackQuery(query *tgbotapi.CallbackQuery) error 
 		return tb.handleDurationSelection(data, chatID, messageID)
 	case strings.HasPrefix(data, "lock_"):
 		return tb.handleLockSession(data, chatID, messageID)
+	case strings.HasPrefix(data, "extend_"):
+		return tb.handleExtendSession(data, chatID, messageID)
 	case data == "resetpw_all":
 		return tb.handleResetAllPasswords(chatID, messageID)
 	case strings.HasPrefix(data, "resetpw_"):
@@ -538,6 +540,28 @@ func (tb *TelegramBot) handleLockSession(data string, chatID int64, messageID in
 	return err
 }
 
+func (tb *TelegramBot) handleExtendSession(data string, chatID int64, messageID int) error {
+	username := strings.TrimPrefix(data, "extend_")
+	if tb.sessionMgr == nil {
+		return nil
+	}
+	// Extend by 15 minutes
+	if err := tb.sessionMgr.ExtendSession(username, 15*time.Minute); err != nil {
+		msg := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf("❌ Не удалось продлить сеанс для %s: %v", username, err))
+		tb.bot.Send(msg)
+		return err
+	}
+	msg := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf("✅ Сеанс %s продлён на 15 минут.", username))
+	msg.ParseMode = "Markdown"
+	msg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{
+		InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
+			{tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu")},
+		},
+	}
+	_, err := tb.bot.Send(msg)
+	return err
+}
+
 func (tb *TelegramBot) handleLockAllNow(chatID int64, messageID int) error {
 	if tb.sessionMgr == nil {
 		return nil
@@ -581,6 +605,7 @@ func (tb *TelegramBot) showLockMenu(chatID int64, messageID int) error {
 		buttonText := fmt.Sprintf("🔒 %s (осталось %v)", username, remaining.Round(time.Minute))
 		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(buttonText, "lock_"+username),
+			tgbotapi.NewInlineKeyboardButtonData("➕ +15 мин", "extend_"+username),
 		))
 	}
 
