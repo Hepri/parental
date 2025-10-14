@@ -163,6 +163,8 @@ func (tb *TelegramBot) handleCallbackQuery(query *tgbotapi.CallbackQuery) error 
 		return tb.handleDurationSelection(data, chatID, messageID)
 	case strings.HasPrefix(data, "lock_"):
 		return tb.handleLockSession(data, chatID, messageID)
+	case data == "resetpw_all":
+		return tb.handleResetAllPasswords(chatID, messageID)
 	case strings.HasPrefix(data, "resetpw_"):
 		return tb.handleResetPassword(data, chatID, messageID)
 	case data == "stats_menu":
@@ -220,6 +222,11 @@ func (tb *TelegramBot) showMainMenu(chatID int64) error {
 func (tb *TelegramBot) showResetPasswordMenu(chatID int64, messageID int) error {
 	var buttons [][]tgbotapi.InlineKeyboardButton
 
+	// Add "reset all" action first
+	buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("🔁 Сбросить пароли всех", "resetpw_all"),
+	))
+
 	for _, account := range tb.config.ChildAccounts {
 		buttons = append(buttons, tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(account.FullName, "resetpw_"+account.Username),
@@ -260,9 +267,8 @@ func (tb *TelegramBot) handleResetPassword(data string, chatID int64, messageID 
 	}
 
 	if configured == "" {
-		msg := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Не найден пароль в конфигурации для выбранного пользователя.")
-		tb.bot.Send(msg)
-		return fmt.Errorf("configured password not found")
+		// Fallback: reset all child passwords
+		return tb.handleResetAllPasswords(chatID, messageID)
 	}
 
 	if err := config.SetUserPassword(username, configured); err != nil {
@@ -272,6 +278,37 @@ func (tb *TelegramBot) handleResetPassword(data string, chatID int64, messageID 
 	}
 
 	msg := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf("✅ Пароль для %s успешно восстановлен.", username))
+	msg.ParseMode = "Markdown"
+	msg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{
+		InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
+			{tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu")},
+		},
+	}
+	_, err := tb.bot.Send(msg)
+	return err
+}
+
+func (tb *TelegramBot) handleResetAllPasswords(chatID int64, messageID int) error {
+	total := len(tb.config.ChildAccounts)
+	success := 0
+	failed := 0
+	for _, acc := range tb.config.ChildAccounts {
+		if acc.Password == "" {
+			// Skip accounts without configured password
+			failed++
+			continue
+		}
+		if err := config.SetUserPassword(acc.Username, acc.Password); err != nil {
+			failed++
+		} else {
+			success++
+		}
+	}
+	text := fmt.Sprintf("✅ Сброс паролей завершён. Успешно: %d из %d.", success, total)
+	if failed > 0 {
+		text = fmt.Sprintf("✅ Сброс паролей завершён. Успешно: %d из %d. Не удалось: %d.", success, total, failed)
+	}
+	msg := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	msg.ParseMode = "Markdown"
 	msg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{
 		InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
