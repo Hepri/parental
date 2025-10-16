@@ -22,10 +22,12 @@ type ChildAccount struct {
 }
 
 type Config struct {
-	TelegramBotToken  string         `json:"telegram_bot_token"`
-	AuthorizedUserIDs []int64        `json:"authorized_user_ids"`
-	ChildAccounts     []ChildAccount `json:"child_accounts"`
-	DataRetentionDays int            `json:"data_retention_days"`
+	TelegramBotToken     string         `json:"telegram_bot_token"`
+	AuthorizedUserIDs    []int64        `json:"authorized_user_ids"`
+	ChildAccounts        []ChildAccount `json:"child_accounts"`
+	DataRetentionDays    int            `json:"data_retention_days"`
+	ReconnectInterval    int            `json:"reconnect_interval_seconds"` // Интервал переподключения в секундах
+	MaxReconnectAttempts int            `json:"max_reconnect_attempts"`     // Максимальное количество попыток переподключения (0 = бесконечно)
 }
 
 var (
@@ -93,6 +95,14 @@ func LoadConfig(configPath string) (*Config, error) {
 
 	if config.DataRetentionDays <= 0 {
 		config.DataRetentionDays = 7 // Default to 7 days
+	}
+
+	// Set default reconnect settings
+	if config.ReconnectInterval <= 0 {
+		config.ReconnectInterval = 30 // Default to 30 seconds
+	}
+	if config.MaxReconnectAttempts < 0 {
+		config.MaxReconnectAttempts = 0 // Default to infinite attempts
 	}
 
 	return &config, nil

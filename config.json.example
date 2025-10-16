@@ -13,5 +13,7 @@
       "password": "auto-generated-on-creation"
     }
   ],
-  "data_retention_days": 7
+  "data_retention_days": 7,
+  "reconnect_interval_seconds": 30,
+  "max_reconnect_attempts": 0
 }

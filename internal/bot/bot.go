@@ -19,13 +19,15 @@ import (
 )
 
 type TelegramBot struct {
-	bot         *tgbotapi.BotAPI
-	config      *config.Config
-	sessionMgr  *session.Manager
-	tracker     *tracker.TimeTracker
-	shutdownMgr *shutdown.ShutdownManager
-	userStates  map[int64]string                 // userID -> state
-	userData    map[int64]map[string]interface{} // userID -> data
+	bot               *tgbotapi.BotAPI
+	config            *config.Config
+	sessionMgr        *session.Manager
+	tracker           *tracker.TimeTracker
+	shutdownMgr       *shutdown.ShutdownManager
+	userStates        map[int64]string                 // userID -> state
+	userData          map[int64]map[string]interface{} // userID -> data
+	reconnectAttempts int                              // Количество попыток переподключения
+	isConnected       bool                             // Статус подключения
 }
 
 type BotCommand struct {
@@ -43,31 +45,50 @@ func NewBot(cfg *config.Config, sessionMgr *session.Manager, tracker *tracker.Ti
 	bot.Debug = false // Set to true for debugging
 
 	return &TelegramBot{
-		bot:         bot,
-		config:      cfg,
-		sessionMgr:  sessionMgr,
-		tracker:     tracker,
-		shutdownMgr: shutdownMgr,
-		userStates:  make(map[int64]string),
-		userData:    make(map[int64]map[string]interface{}),
+		bot:               bot,
+		config:            cfg,
+		sessionMgr:        sessionMgr,
+		tracker:           tracker,
+		shutdownMgr:       shutdownMgr,
+		userStates:        make(map[int64]string),
+		userData:          make(map[int64]map[string]interface{}),
+		reconnectAttempts: 0,
+		isConnected:       true,
 	}, nil
 }
 
 func (tb *TelegramBot) Start(ctx context.Context) error {
-	u := tgbotapi.NewUpdate(0)
-	u.Timeout = 60
-
-	updates := tb.bot.GetUpdatesChan(u)
-
-	log.Printf("Telegram bot started. Bot username: @%s", tb.bot.Self.UserName)
+	log.Printf("Starting Telegram bot with reconnect mechanism...")
 
 	for {
 		select {
 		case <-ctx.Done():
+			log.Println("Bot context cancelled, stopping...")
 			return nil
-		case update := <-updates:
-			if err := tb.handleUpdate(update); err != nil {
-				log.Printf("Error handling update: %v", err)
+		default:
+			if err := tb.connectAndRun(ctx); err != nil {
+				log.Printf("Bot connection error: %v", err)
+
+				// Проверяем, нужно ли продолжать попытки переподключения
+				if !tb.shouldReconnect() {
+					log.Printf("Max reconnect attempts reached (%d), stopping bot", tb.config.MaxReconnectAttempts)
+					return fmt.Errorf("max reconnect attempts reached: %v", err)
+				}
+
+				// Увеличиваем счетчик попыток
+				tb.reconnectAttempts++
+				log.Printf("Attempting to reconnect in %d seconds (attempt %d/%s)...",
+					tb.config.ReconnectInterval,
+					tb.reconnectAttempts,
+					tb.getMaxAttemptsString())
+
+				// Ждем перед следующей попыткой
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-time.After(time.Duration(tb.config.ReconnectInterval) * time.Second):
+					continue
+				}
 			}
 		}
 	}
@@ -75,6 +96,112 @@ func (tb *TelegramBot) Start(ctx context.Context) error {
 
 func (tb *TelegramBot) Stop() {
 	log.Println("Telegram bot stopped")
+	tb.isConnected = false
+}
+
+// connectAndRun пытается подключиться к Telegram и запустить бота
+func (tb *TelegramBot) connectAndRun(ctx context.Context) error {
+	// Попытка переподключения
+	if tb.reconnectAttempts > 0 {
+		log.Printf("Attempting to reconnect to Telegram (attempt %d)...", tb.reconnectAttempts)
+
+		// Создаем новый экземпляр бота
+		bot, err := tgbotapi.NewBotAPI(tb.config.TelegramBotToken)
+		if err != nil {
+			return fmt.Errorf("failed to reconnect bot: %v", err)
+		}
+
+		tb.bot = bot
+		tb.bot.Debug = false
+	}
+
+	// Проверяем подключение, получая информацию о боте
+	_, err := tb.bot.GetMe()
+	if err != nil {
+		return fmt.Errorf("failed to verify bot connection: %v", err)
+	}
+
+	log.Printf("Telegram bot connected successfully. Bot username: @%s", tb.bot.Self.UserName)
+	tb.isConnected = true
+
+	// Сбрасываем счетчик попыток при успешном подключении
+	tb.reconnectAttempts = 0
+
+	// Запускаем основной цикл обработки сообщений
+	return tb.runMessageLoop(ctx)
+}
+
+// runMessageLoop запускает основной цикл обработки сообщений
+func (tb *TelegramBot) runMessageLoop(ctx context.Context) error {
+	u := tgbotapi.NewUpdate(0)
+	u.Timeout = 60
+
+	updates := tb.bot.GetUpdatesChan(u)
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("Message loop context cancelled")
+			return nil
+		case update := <-updates:
+			if err := tb.handleUpdate(update); err != nil {
+				log.Printf("Error handling update: %v", err)
+				// Если ошибка критическая, возвращаем её для переподключения
+				if tb.isCriticalError(err) {
+					return err
+				}
+			}
+		}
+	}
+}
+
+// shouldReconnect определяет, нужно ли продолжать попытки переподключения
+func (tb *TelegramBot) shouldReconnect() bool {
+	// Если MaxReconnectAttempts = 0, то бесконечные попытки
+	if tb.config.MaxReconnectAttempts == 0 {
+		return true
+	}
+
+	// Проверяем, не превышено ли максимальное количество попыток
+	return tb.reconnectAttempts < tb.config.MaxReconnectAttempts
+}
+
+// getMaxAttemptsString возвращает строковое представление максимального количества попыток
+func (tb *TelegramBot) getMaxAttemptsString() string {
+	if tb.config.MaxReconnectAttempts == 0 {
+		return "∞"
+	}
+	return fmt.Sprintf("%d", tb.config.MaxReconnectAttempts)
+}
+
+// isCriticalError определяет, является ли ошибка критической для переподключения
+func (tb *TelegramBot) isCriticalError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := err.Error()
+
+	// Критические ошибки, требующие переподключения
+	criticalErrors := []string{
+		"connection refused",
+		"connection reset",
+		"timeout",
+		"network is unreachable",
+		"no route to host",
+		"connection lost",
+		"telegram api error",
+		"unauthorized",
+		"forbidden",
+	}
+
+	for _, criticalErr := range criticalErrors {
+		if strings.Contains(strings.ToLower(errStr), criticalErr) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // GetMe returns bot information for testing

@@ -130,8 +130,9 @@ func (s *ParentalControlService) initialize() error {
 func (s *ParentalControlService) runBot() {
 	log.Println("Starting Telegram bot...")
 	if err := s.bot.Start(s.ctx); err != nil {
-		log.Printf("Bot error: %v", err)
-		s.cancel() // Signal service to stop
+		log.Printf("Bot stopped with error: %v", err)
+		// Не вызываем s.cancel() здесь, так как бот теперь сам управляет переподключением
+		// Сервис будет продолжать работать, а бот будет пытаться переподключиться
 	}
 }
 
