@@ -14,6 +14,7 @@ import (
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 
+	"github.com/Hepri/parental/internal/logger"
 	"github.com/Hepri/parental/internal/service"
 )
 
@@ -82,6 +83,13 @@ func runService(debug bool) {
 		fmt.Println("Starting Parental Control Bot in DEBUG mode...")
 		fmt.Println("Press Ctrl+C to stop")
 
+		// Initialize logger for debug mode (logs to both console and file)
+		if err := logger.InitLogger(true); err != nil {
+			fmt.Printf("Failed to initialize logger: %v\n", err)
+			fmt.Println("Continuing without file logging...")
+		}
+		defer logger.CloseLogger()
+
 		// Create context for graceful shutdown
 		ctx, cancel := context.WithCancel(context.Background())
 
@@ -103,6 +111,13 @@ func runService(debug bool) {
 			log.Fatalf("Debug mode failed: %v", err)
 		}
 	} else {
+		// Initialize logger for service mode (logs only to file)
+		if err := logger.InitLogger(false); err != nil {
+			// В сервисном режиме без логгера невозможно работать
+			log.Fatalf("Failed to initialize logger: %v", err)
+		}
+		defer logger.CloseLogger()
+
 		// Run as Windows service
 		err = svc.Run(serviceName, &service.ParentalControlService{})
 	}

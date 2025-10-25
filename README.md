@@ -138,15 +138,68 @@ parental-control-bot/
 ├── config.json.example        # Configuration template
 ├── config.json               # Your configuration (created)
 ├── time_tracking.json        # Time tracking data (created)
+├── logs/                      # Log files directory (auto-created)
+│   ├── parental-bot-2025-10-25.log
+│   └── parental-bot-2025-10-24.log
 ├── internal/
 │   ├── bot/                  # Telegram bot implementation
 │   ├── config/               # Configuration management
+│   ├── logger/               # Logging system
 │   ├── service/              # Windows service wrapper
 │   ├── session/              # Session management
 │   ├── shutdown/             # Shutdown control
 │   └── tracker/              # Time tracking
 └── README.md                 # This file
 ```
+
+## Logging
+
+### Log Files Location
+
+All logs are automatically saved to the `logs` folder next to the executable:
+- Daily log files: `parental-bot-YYYY-MM-DD.log`
+- Automatic cleanup after 7 days
+- Typical size: 100-500 KB per day
+
+### Log Modes
+
+**Debug Mode (`-debug` flag):**
+- Logs to console AND file
+- Use for testing and troubleshooting
+
+**Service Mode (normal operation):**
+- Logs only to file
+- Use for production
+
+### Viewing Logs
+
+**PowerShell (real-time monitoring):**
+```powershell
+Get-Content "C:\path\to\logs\parental-bot-2025-10-25.log" -Wait -Tail 50
+```
+
+**Command Prompt:**
+```cmd
+type "C:\path\to\logs\parental-bot-2025-10-25.log"
+```
+
+**Search for errors:**
+```powershell
+Select-String -Path "logs\*.log" -Pattern "ERROR"
+```
+
+### What Gets Logged
+
+- Service initialization and shutdown
+- Configuration loading
+- Bot connection status and reconnection attempts
+- Session grants, locks, and expirations (every 30 seconds)
+- User commands and actions
+- All errors and warnings
+
+### Detailed Logging Guide
+
+For comprehensive information about logging, see [LOGGING_GUIDE.md](LOGGING_GUIDE.md)
 
 ## Debugging and Troubleshooting
 
@@ -170,18 +223,20 @@ parental-control-bot.exe
 ### Service Won't Start
 1. **First, test configuration:** `parental-control-bot.exe -test`
 2. **Try debug mode:** `parental-control-bot.exe -debug`
-3. Check Windows Event Log for errors
-4. Verify `config.json` exists and is valid
-5. Ensure bot token is correct
-6. Run as administrator
+3. **Check log files** in `logs` folder for detailed error messages
+4. Check Windows Event Log for errors
+5. Verify `config.json` exists and is valid
+6. Ensure bot token is correct
+7. Run as administrator
 
 ### Bot Not Responding
 1. **Test connection:** `parental-control-bot.exe -test`
 2. **Debug mode:** `parental-control-bot.exe -debug`
-3. Verify Telegram bot token is correct
-4. Check if your user ID is in `authorized_user_ids`
-5. Ensure internet connection is working
-6. Check Windows Event Log for bot errors
+3. **Check log files** in `logs` folder - look for "Bot connection error" or "reconnect" messages
+4. Verify Telegram bot token is correct
+5. Check if your user ID is in `authorized_user_ids`
+6. Ensure internet connection is working
+7. Check Windows Event Log for bot errors
 
 ### Child Account Issues
 1. Service automatically creates accounts on startup

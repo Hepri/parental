@@ -32,37 +32,48 @@ type ParentalControlService struct {
 
 func (s *ParentalControlService) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (ssec bool, errno uint32) {
 	const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown | svc.AcceptPauseAndContinue
+
+	log.Println("=== Parental Control Service Execute started ===")
 	changes <- svc.Status{State: svc.StartPending}
 
 	// Initialize service
+	log.Println("Initializing service...")
 	if err := s.initialize(); err != nil {
 		log.Printf("Failed to initialize service: %v", err)
 		changes <- svc.Status{State: svc.Stopped}
 		return false, 1
 	}
 
+	log.Println("Service initialized successfully, changing status to Running")
 	changes <- svc.Status{State: svc.Running, Accepts: cmdsAccepted}
 
 	// Start background goroutines
+	log.Println("Starting background goroutines...")
 	go s.runBot()
 	go s.runTimeTracker()
 	go s.runSessionMonitor()
+	log.Println("All background goroutines started")
 
 	// Handle service control requests
+	log.Println("Entering main service loop...")
 	for {
 		select {
 		case c := <-r:
 			switch c.Cmd {
 			case svc.Interrogate:
+				log.Println("Service interrogate request received")
 				changes <- c.CurrentStatus
 			case svc.Stop, svc.Shutdown:
-				log.Println("Service stopping...")
+				log.Println("Service stop/shutdown request received")
 				s.cleanup()
 				changes <- svc.Status{State: svc.StopPending}
+				log.Println("Service stopped")
 				return false, 0
 			case svc.Pause:
+				log.Println("Service pause request received")
 				changes <- svc.Status{State: svc.Paused, Accepts: cmdsAccepted}
 			case svc.Continue:
+				log.Println("Service continue request received")
 				changes <- svc.Status{State: svc.Running, Accepts: cmdsAccepted}
 			default:
 				log.Printf("Unexpected control request #%d", c)
@@ -71,6 +82,7 @@ func (s *ParentalControlService) Execute(args []string, r <-chan svc.ChangeReque
 			log.Println("Service context cancelled")
 			s.cleanup()
 			changes <- svc.Status{State: svc.StopPending}
+			log.Println("Service stopped after context cancellation")
 			return false, 0
 		}
 	}
@@ -78,52 +90,67 @@ func (s *ParentalControlService) Execute(args []string, r <-chan svc.ChangeReque
 
 func (s *ParentalControlService) initialize() error {
 	// Create context for graceful shutdown
+	log.Println("Creating service context...")
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 
 	// Load configuration
 	configPath := filepath.Join(filepath.Dir(os.Args[0]), "config.json")
+	log.Printf("Loading configuration from: %s", configPath)
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %v", err)
 	}
 	s.config = cfg
+	log.Printf("Configuration loaded successfully. Authorized users: %d, Child accounts: %d",
+		len(cfg.AuthorizedUserIDs), len(cfg.ChildAccounts))
 
 	// Ensure child accounts exist
+	log.Println("Ensuring child accounts exist...")
 	if err := config.EnsureChildAccounts(s.config); err != nil {
 		return fmt.Errorf("failed to ensure child accounts: %v", err)
 	}
+	log.Println("Child accounts verified/created successfully")
 
 	// Initialize session manager
+	log.Println("Initializing session manager...")
 	s.sessionMgr, err = session.NewManager(s.config.ChildAccounts)
 	if err != nil {
 		return fmt.Errorf("failed to initialize session manager: %v", err)
 	}
+	log.Println("Session manager initialized")
 
 	// Initialize time tracker
+	log.Println("Initializing time tracker...")
 	s.tracker, err = tracker.NewTracker()
 	if err != nil {
 		return fmt.Errorf("failed to initialize time tracker: %v", err)
 	}
+	log.Println("Time tracker initialized")
 
 	// Initialize shutdown manager
+	log.Println("Initializing shutdown manager...")
 	s.shutdownMgr = shutdown.NewShutdownManager()
+	log.Println("Shutdown manager initialized")
 
 	// Initialize Telegram bot
+	log.Println("Initializing Telegram bot...")
 	s.bot, err = bot.NewBot(s.config, s.sessionMgr, s.tracker, s.shutdownMgr)
 	if err != nil {
 		return fmt.Errorf("failed to initialize Telegram bot: %v", err)
 	}
+	log.Println("Telegram bot initialized successfully")
 
 	// Setup event logging
 	elog, err := eventlog.Open("ParentalControlBot")
 	if err != nil {
-		log.Printf("Failed to open event log: %v", err)
+		log.Printf("Warning: Failed to open event log: %v", err)
 	} else {
 		elog.Info(1, "Parental Control Bot Service started")
 		elog.Close()
+		log.Println("Event log entry created")
 	}
 
-	log.Println("Service initialized successfully")
+	log.Println("=== Service initialization completed successfully ===")
 	return nil
 }
 
@@ -145,57 +172,79 @@ func (s *ParentalControlService) runTimeTracker() {
 }
 
 func (s *ParentalControlService) runSessionMonitor() {
-	log.Println("Starting session monitor...")
+	log.Println("Session monitor started, checking every 30 seconds...")
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
+	checkCount := 0
 	for {
 		select {
 		case <-s.ctx.Done():
+			log.Println("Session monitor stopped due to context cancellation")
 			return
 		case <-ticker.C:
+			checkCount++
+			log.Printf("Session monitor check #%d - Checking for expired sessions...", checkCount)
+
 			// Check for expired sessions and lock them
 			expiredSessions := s.sessionMgr.GetExpiredSessions()
-			for _, session := range expiredSessions {
-				log.Printf("Session expired for user: %s", session.Username)
-				if err := s.sessionMgr.LockSession(session.Username); err != nil {
-					log.Printf("Failed to lock expired session for %s: %v", session.Username, err)
-				} else {
-					// Notify bot about expired session
-					s.bot.NotifySessionExpired(session.Username)
+			if len(expiredSessions) > 0 {
+				log.Printf("Found %d expired session(s)", len(expiredSessions))
+				for _, session := range expiredSessions {
+					log.Printf("Session expired for user: %s", session.Username)
+					if err := s.sessionMgr.LockSession(session.Username); err != nil {
+						log.Printf("ERROR: Failed to lock expired session for %s: %v", session.Username, err)
+					} else {
+						log.Printf("Successfully locked session for user: %s", session.Username)
+						// Notify bot about expired session
+						s.bot.NotifySessionExpired(session.Username)
+					}
 				}
+			} else {
+				log.Printf("No expired sessions found")
 			}
 		}
 	}
 }
 
 func (s *ParentalControlService) cleanup() {
-	log.Println("Cleaning up service...")
+	log.Println("=== Starting service cleanup ===")
 
 	if s.cancel != nil {
+		log.Println("Cancelling service context...")
 		s.cancel()
 	}
 
 	if s.bot != nil {
+		log.Println("Stopping Telegram bot...")
 		s.bot.Stop()
+		log.Println("Telegram bot stopped")
 	}
 
 	if s.tracker != nil {
+		log.Println("Stopping time tracker...")
 		s.tracker.Stop()
+		log.Println("Time tracker stopped")
 	}
 
 	if s.sessionMgr != nil {
+		log.Println("Cleaning up session manager...")
 		s.sessionMgr.Cleanup()
+		log.Println("Session manager cleaned up")
 	}
 
 	// Log service stop
+	log.Println("Writing to event log...")
 	elog, err := eventlog.Open("ParentalControlBot")
 	if err == nil {
 		elog.Info(1, "Parental Control Bot Service stopped")
 		elog.Close()
+		log.Println("Event log entry created")
+	} else {
+		log.Printf("Warning: Failed to write to event log: %v", err)
 	}
 
-	log.Println("Service cleanup completed")
+	log.Println("=== Service cleanup completed ===")
 }
 
 // RunDebug runs the service in debug mode (not as Windows service)
