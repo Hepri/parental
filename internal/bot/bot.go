@@ -37,15 +37,10 @@ type BotCommand struct {
 }
 
 func NewBot(cfg *config.Config, sessionMgr *session.Manager, tracker *tracker.TimeTracker, shutdownMgr *shutdown.ShutdownManager) (*TelegramBot, error) {
-	bot, err := tgbotapi.NewBotAPI(cfg.TelegramBotToken)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create bot: %v", err)
-	}
-
-	bot.Debug = false // Set to true for debugging
-
+	// Не создаем подключение здесь - это будет сделано в connectAndRun()
+	// Это позволяет создать бота даже при отсутствии интернета
 	return &TelegramBot{
-		bot:               bot,
+		bot:               nil, // Будет создан при первом подключении
 		config:            cfg,
 		sessionMgr:        sessionMgr,
 		tracker:           tracker,
@@ -53,26 +48,33 @@ func NewBot(cfg *config.Config, sessionMgr *session.Manager, tracker *tracker.Ti
 		userStates:        make(map[int64]string),
 		userData:          make(map[int64]map[string]interface{}),
 		reconnectAttempts: 0,
-		isConnected:       true,
+		isConnected:       false,
 	}, nil
 }
 
 func (tb *TelegramBot) Start(ctx context.Context) error {
 	log.Printf("Starting Telegram bot with reconnect mechanism...")
+	log.Printf("Reconnect settings: interval=%ds, max_attempts=%s",
+		tb.config.ReconnectInterval, tb.getMaxAttemptsString())
 
+	// Бесконечный цикл переподключения - программа не останавливается при отсутствии интернета
 	for {
 		select {
 		case <-ctx.Done():
 			log.Println("Bot context cancelled, stopping...")
 			return nil
 		default:
+			// Пытаемся подключиться и запустить бота
+			// connectAndRun() вернется при ошибке подключения/потере соединения или отмене контекста
 			if err := tb.connectAndRun(ctx); err != nil {
 				log.Printf("Bot connection error: %v", err)
+				tb.isConnected = false
 
-				// Проверяем, нужно ли продолжать попытки переподключения
+				// Всегда продолжаем попытки переподключения (бесконечно)
+				// shouldReconnect() проверяет MaxReconnectAttempts, но по умолчанию оно = 0 (бесконечно)
 				if !tb.shouldReconnect() {
-					log.Printf("Max reconnect attempts reached (%d), stopping bot", tb.config.MaxReconnectAttempts)
-					return fmt.Errorf("max reconnect attempts reached: %v", err)
+					log.Printf("Max reconnect attempts reached (%d), but continuing anyway...", tb.config.MaxReconnectAttempts)
+					// Даже если достигнут максимум, продолжаем попытки - программа не должна останавливаться
 				}
 
 				// Увеличиваем счетчик попыток
@@ -85,10 +87,16 @@ func (tb *TelegramBot) Start(ctx context.Context) error {
 				// Ждем перед следующей попыткой
 				select {
 				case <-ctx.Done():
+					log.Println("Context cancelled during reconnect wait")
 					return nil
 				case <-time.After(time.Duration(tb.config.ReconnectInterval) * time.Second):
 					continue
 				}
+			} else {
+				// Если connectAndRun() вернулся без ошибки, это означает что контекст был отменен
+				// и мы выходим из цикла
+				log.Println("Bot stopped (context cancelled)")
+				return nil
 			}
 		}
 	}
@@ -101,14 +109,19 @@ func (tb *TelegramBot) Stop() {
 
 // connectAndRun пытается подключиться к Telegram и запустить бота
 func (tb *TelegramBot) connectAndRun(ctx context.Context) error {
-	// Попытка переподключения
-	if tb.reconnectAttempts > 0 {
-		log.Printf("Attempting to reconnect to Telegram (attempt %d)...", tb.reconnectAttempts)
+	// Создаем или пересоздаем подключение к боту
+	// Это работает как для начального подключения, так и для переподключений
+	if tb.bot == nil || tb.reconnectAttempts > 0 {
+		if tb.reconnectAttempts > 0 {
+			log.Printf("Attempting to reconnect to Telegram (attempt %d)...", tb.reconnectAttempts)
+		} else {
+			log.Printf("Attempting initial connection to Telegram...")
+		}
 
 		// Создаем новый экземпляр бота
 		bot, err := tgbotapi.NewBotAPI(tb.config.TelegramBotToken)
 		if err != nil {
-			return fmt.Errorf("failed to reconnect bot: %v", err)
+			return fmt.Errorf("failed to create bot connection: %v", err)
 		}
 
 		tb.bot = bot
@@ -116,12 +129,12 @@ func (tb *TelegramBot) connectAndRun(ctx context.Context) error {
 	}
 
 	// Проверяем подключение, получая информацию о боте
-	_, err := tb.bot.GetMe()
+	me, err := tb.bot.GetMe()
 	if err != nil {
 		return fmt.Errorf("failed to verify bot connection: %v", err)
 	}
 
-	log.Printf("Telegram bot connected successfully. Bot username: @%s", tb.bot.Self.UserName)
+	log.Printf("Telegram bot connected successfully. Bot username: @%s", me.UserName)
 	tb.isConnected = true
 
 	// Сбрасываем счетчик попыток при успешном подключении
@@ -143,11 +156,19 @@ func (tb *TelegramBot) runMessageLoop(ctx context.Context) error {
 		case <-ctx.Done():
 			log.Println("Message loop context cancelled")
 			return nil
-		case update := <-updates:
+		case update, ok := <-updates:
+			// Проверяем, не закрыт ли канал (это означает потерю соединения)
+			if !ok {
+				log.Println("Updates channel closed, connection lost")
+				tb.isConnected = false
+				return fmt.Errorf("updates channel closed - connection lost")
+			}
+
 			if err := tb.handleUpdate(update); err != nil {
 				log.Printf("Error handling update: %v", err)
 				// Если ошибка критическая, возвращаем её для переподключения
 				if tb.isCriticalError(err) {
+					tb.isConnected = false
 					return err
 				}
 			}
@@ -180,7 +201,7 @@ func (tb *TelegramBot) isCriticalError(err error) bool {
 		return false
 	}
 
-	errStr := err.Error()
+	errStr := strings.ToLower(err.Error())
 
 	// Критические ошибки, требующие переподключения
 	criticalErrors := []string{
@@ -193,10 +214,20 @@ func (tb *TelegramBot) isCriticalError(err error) bool {
 		"telegram api error",
 		"unauthorized",
 		"forbidden",
+		"no such host",
+		"i/o timeout",
+		"context deadline exceeded",
+		"connection closed",
+		"broken pipe",
+		"eof",
+		"network",
+		"dial tcp",
+		"read: connection",
+		"write: broken pipe",
 	}
 
 	for _, criticalErr := range criticalErrors {
-		if strings.Contains(strings.ToLower(errStr), criticalErr) {
+		if strings.Contains(errStr, criticalErr) {
 			return true
 		}
 	}
@@ -206,6 +237,9 @@ func (tb *TelegramBot) isCriticalError(err error) bool {
 
 // GetMe returns bot information for testing
 func (tb *TelegramBot) GetMe() (tgbotapi.User, error) {
+	if tb.bot == nil {
+		return tgbotapi.User{}, fmt.Errorf("bot not connected")
+	}
 	return tb.bot.GetMe()
 }
 
@@ -1047,10 +1081,22 @@ func (tb *TelegramBot) cancelShutdown(chatID int64, messageID int) error {
 }
 
 func (tb *TelegramBot) NotifySessionExpired(username string) {
+	// Проверяем, что бот подключен перед отправкой уведомлений
+	if tb.bot == nil || !tb.isConnected {
+		log.Printf("Cannot notify about expired session for %s: bot not connected", username)
+		return
+	}
+
 	// Notify all authorized users about expired session
 	for _, userID := range tb.config.AuthorizedUserIDs {
 		msg := tgbotapi.NewMessage(userID, fmt.Sprintf("⏰ *Сеанс истек*\n\nСессия пользователя %s истекла и заблокирована.", username))
 		msg.ParseMode = "Markdown"
-		tb.bot.Send(msg)
+		if _, err := tb.bot.Send(msg); err != nil {
+			log.Printf("Failed to send session expired notification to user %d: %v", userID, err)
+			// Если ошибка критическая, помечаем соединение как потерянное
+			if tb.isCriticalError(err) {
+				tb.isConnected = false
+			}
+		}
 	}
 }

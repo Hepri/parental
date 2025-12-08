@@ -124,3 +124,4 @@ func Warning(format string, v ...interface{}) {
 func Debug(format string, v ...interface{}) {
 	log.Printf("[DEBUG] "+format, v...)
 }
+
