@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -124,6 +125,11 @@ func (tb *TelegramBot) connectAndRun(ctx context.Context) error {
 			return fmt.Errorf("failed to create bot connection: %v", err)
 		}
 
+		// Устанавливаем HTTP клиент с таймаутом 8 секунд для всех сетевых операций
+		bot.Client = &http.Client{
+			Timeout: 8 * time.Second,
+		}
+
 		tb.bot = bot
 		tb.bot.Debug = false
 	}
@@ -147,7 +153,7 @@ func (tb *TelegramBot) connectAndRun(ctx context.Context) error {
 // runMessageLoop запускает основной цикл обработки сообщений
 func (tb *TelegramBot) runMessageLoop(ctx context.Context) error {
 	u := tgbotapi.NewUpdate(0)
-	u.Timeout = 60
+	u.Timeout = 8 // Таймаут 8 секунд для получения обновлений
 
 	updates := tb.bot.GetUpdatesChan(u)
 
