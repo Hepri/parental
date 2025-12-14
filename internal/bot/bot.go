@@ -125,9 +125,10 @@ func (tb *TelegramBot) connectAndRun(ctx context.Context) error {
 			return fmt.Errorf("failed to create bot connection: %v", err)
 		}
 
-		// Устанавливаем HTTP клиент с таймаутом 8 секунд для всех сетевых операций
+		// Устанавливаем HTTP клиент без таймаута для обычных операций
+		// Таймаут будет применяться только для получения обновлений через long polling
 		bot.Client = &http.Client{
-			Timeout: 8 * time.Second,
+			Timeout: 0, // Без таймаута для обычных операций
 		}
 
 		tb.bot = bot
@@ -135,7 +136,13 @@ func (tb *TelegramBot) connectAndRun(ctx context.Context) error {
 	}
 
 	// Проверяем подключение, получая информацию о боте
+	// Используем отдельный HTTP клиент с таймаутом только для первого подключения
+	originalClient := tb.bot.Client
+	tb.bot.Client = &http.Client{
+		Timeout: 8 * time.Second, // Таймаут только для проверки подключения
+	}
 	me, err := tb.bot.GetMe()
+	tb.bot.Client = originalClient // Возвращаем обычный клиент без таймаута
 	if err != nil {
 		return fmt.Errorf("failed to verify bot connection: %v", err)
 	}
